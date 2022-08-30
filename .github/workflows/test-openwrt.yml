@@ -7,8 +7,28 @@ on:
   workflow_dispatch:
 
 jobs:
+  get-version:
+    name: get latest version number
+    runs-on: ubuntu-latest
+    outputs:
+      CUR_VERSION: ${{steps.get-version.outputs.CUR_VERSION}}
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        ref: VERSION_CONTROL
+        fetch-depth: 1
+        path: version_control
+    - name: get version
+      id: get-version
+      run: |
+          #获取当前版本号
+          pre_version=$(cat version_control/VERSION | grep "PREFEX" | sed 's/PREFEX=\(.*\)/\1/')
+          cur_version=$(cat version_control/VERSION | grep "CUR_VERS" | sed 's/CUR_VERS=\(.*\)/\1/')
+          echo "::set-output name=CUR_VERSION::$pre_version$cur_version"
+          
   release:
     name: Build for ${{ matrix.arch }}
+    needs: get-version
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -148,6 +168,8 @@ jobs:
           ln -sf ~/.ccache "$sdk_home/.ccache"
           echo "SDK_HOME=$sdk_home" >> $GITHUB_ENV
           echo "CONFIG_CCACHE=y" >> $GITHUB_ENV
+          #修改版本号
+          sed -i "s/VER=.*/VER=${{needs.get-version.outputs.CUR_VERSION}}/" ${{ github.workspace }}/package/openwrt/make_openwrt.sh         
       - name: Build package
         env:
           OPENWRT_GOLANG_COMMIT: ${{ secrets.OPENWRT_GOLANG_COMMIT }}
@@ -166,7 +188,7 @@ jobs:
       - name: Generate release tag
         id: tag
         run: |
-          echo "::set-output name=release_tag::$(date +"%Y.%m.%d")-${{github.run_id}}-OpenWrt"
+          echo "::set-output name=release_tag::${{needs.get-version.outputs.CUR_VERSION}}-OpenWrt"
           touch release.txt
           echo "同步更新上游代码" >> release.txt
           echo ${{ github.sha }} >> Release.txt
@@ -175,7 +197,8 @@ jobs:
         uses: softprops/action-gh-release@v1
         if: steps.tag.outputs.status == 'success'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.TOKEN }}
+          # do not use GITHUB_TOKEN
         with:
           tag_name: ${{ steps.tag.outputs.release_tag }}
           body_path: release.txt

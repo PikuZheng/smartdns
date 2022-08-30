@@ -6,9 +6,32 @@ on:
       - master
 #  pull_request:
   workflow_dispatch:
-
+    inputs:
+      update-version-number:
+        description: 'set to true if you want to update last version number'
+        required: false
+        default: 'false'
 jobs:
+  get-version:
+    name: get latest version number
+    runs-on: ubuntu-latest
+    outputs:
+      CUR_VERSION: ${{steps.get-version.outputs.CUR_VERSION}}
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        ref: VERSION_CONTROL
+        fetch-depth: 1
+        path: version_control
+    - name: get version
+      id: get-version
+      run: |
+          #获取当前版本号
+          pre_version=$(cat version_control/VERSION | grep "PREFEX" | sed 's/PREFEX=\(.*\)/\1/')
+          cur_version=$(cat version_control/VERSION | grep "CUR_VERS" | sed 's/CUR_VERS=\(.*\)/\1/')
+          echo "::set-output name=CUR_VERSION::$pre_version$cur_version"
   build:
+    needs: get-version
     strategy:
       matrix:
         goos: [debian, openwrt, optware]
@@ -40,12 +63,14 @@ jobs:
       GOARCH: ${{ matrix.goarch }}
       CGO_ENABLED: 0
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - name: Build
         continue-on-error: true
         run: |
           sudo timedatectl set-timezone "Asia/Shanghai"
           cd ${{ github.workspace }}/package/
+          #修改版本号
+          sed -i "s/VER=.*/VER=${{needs.get-version.outputs.CUR_VERSION}}/" build-pkg.sh
           # mkdir -p output
           # ./build-pkg.sh --platform $GOOS --arch $GOARCH --filearch $GOARCH-$GOOS --outputdir ${{ github.workspace }}/package/output
           mkdir -p output-static
@@ -73,7 +98,7 @@ jobs:
       - name: Generate release tag
         id: tag
         run: |
-          echo "::set-output name=release_tag::$(date +"%Y.%m.%d")-${{github.run_id}}"
+          echo "::set-output name=release_tag::${{needs.get-version.outputs.CUR_VERSION}}"
           touch release.txt
           echo "同步更新上游代码" >> release.txt
           echo ${{ github.sha }} >> Release.txt
@@ -87,3 +112,33 @@ jobs:
           tag_name: ${{ steps.tag.outputs.release_tag }}
           body_path: release.txt
           files: ${{ github.workspace }}/package/output-static/*
+
+  update-version:
+    if: ((github.event_name=='workflow_dispatch' && github.event.inputs.update-version-number=='true') || github.event_name=='push')
+    name: update latest version number
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        ref: VERSION_CONTROL
+        fetch-depth: 1
+        path: version_control
+    - name: update version
+      run: |
+          #更新当前版本号
+          cd version_control
+          pre_version=$(cat VERSION | grep "PREFEX" | sed 's/PREFEX=\(.*\)/\1/')
+          cur_version=$(cat VERSION | grep "CUR_VERS" | sed 's/CUR_VERS=\(.*\)/\1/')
+          cur_version=$(($cur_version + 1))
+          sed -i "s/CUR_VERS=.*/CUR_VERS=$cur_version/" VERSION
+          git config --local user.email "fake@mail.com"
+          git config --local user.name "PikuZheng"
+          git add VERSION
+          git commit -m "generate new post from github action" -a
+    - name: push changes
+      uses: ad-m/github-push-action@master
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        branch: VERSION_CONTROL
+        directory: ./version_control

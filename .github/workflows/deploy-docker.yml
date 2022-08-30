@@ -1,25 +1,46 @@
 name: Docker Image CI
 on:
   workflow_dispatch:
-    inputs:
-      tag:
-        description: 'release tag to dockerhub'
-        required: true
-        default: ''
-        
+  push:
+    branches:
+      - master
+      
 jobs:
   # 构建并上传 Docker镜像
   build: 
     runs-on: ubuntu-latest # 依赖的环境      
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
+        with:
+          ref: VERSION_CONTROL
+          fetch-depth: 1
+          path: version_control
+      - name: get version
+        id: get-version
+        run: |
+          #获取当前版本号
+          pre_version=$(cat version_control/VERSION | grep "PREFEX" | sed 's/PREFEX=\(.*\)/\1/')
+          cur_version=$(cat version_control/VERSION | grep "CUR_VERS" | sed 's/CUR_VERS=\(.*\)/\1/')
+          echo "::set-output name=CUR_VERSION::$pre_version$cur_version"
+      - uses: actions/checkout@v3
+      - uses: docker/setup-qemu-action@v2
+        with:
+          platforms: linux/amd64,linux/arm64,linux/arm/v7,linux/arm/v6
+      - uses: docker/setup-buildx-action@v2
+        with:
+          install: true
       - name: Build Image
         run: |
-          cd ${{ github.workspace }} && \
-          docker build -t pikuzheng/smartdns:latest -t pikuzheng/smartdns:${{ github.event.inputs.tag }} -f Dockerfile.alpine .
-      - name: Login to Registry
-        run: docker login --username=${{ secrets.DOCKER_USERNAME }} --password='${{ secrets.DOCKER_PASSWORD }}'
-      - name: Push Image
-        run: |
-          docker push pikuzheng/smartdns:latest
-          docker push pikuzheng/smartdns:${{ github.event.inputs.tag }}
+          #修改版本号
+          cd ${{ github.workspace }} 
+          sed -i "s/VER=.*/VER=${{steps.get-version.outputs.CUR_VERSION}}/" package/build-pkg.sh
+          #构建image
+          docker login --username=${{ secrets.DOCKER_USERNAME }} --password='${{ secrets.DOCKER_PASSWORD }}'
+          docker buildx build --no-cache --platform linux/amd64,linux/arm64,linux/arm/v7,linux/arm/v6 --push -t pikuzheng/smartdns:latest -t pikuzheng/smartdns:${{steps.get-version.outputs.CUR_VERSION}} -f Dockerfile.alpine .
+#      - name: Login to Registry
+#        run: |
+#          docker login --username=${{ secrets.DOCKER_USERNAME }} --password='${{ secrets.DOCKER_PASSWORD }}'
+#      - name: Push Image
+#        run: |
+#          docker push pikuzheng/smartdns:latest
+#          docker push pikuzheng/smartdns:${{steps.get-version.outputs.CUR_VERSION}}

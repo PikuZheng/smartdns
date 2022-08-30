@@ -89,10 +89,6 @@ cp -r "$dir/../../src" "package/$package_name/src"
 sed -i "s/PKG_VERSION:=.*/PKG_VERSION:=$VER/" ./package/$package_name/Makefile
 sed -i "s/PKG_MIRROR_HASH:=.*/PKG_MIRROR_HASH:=skip/" ./package/$package_name/Makefile
 
-if [ ! -d "package/openwrt-upx" ] ; then
-	git clone -b master --depth 1 \
-		https://github.com/kuoruan/openwrt-upx.git package/openwrt-upx
-fi
 ./scripts/feeds install -a -f
 
 make defconfig
