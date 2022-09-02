@@ -122,7 +122,8 @@
 		 o.rempty = false;
  
 		 // Port;
-		 o = s.taboption("settings", form.Value, "port", _("Local Port"), _("Smartdns local server port"));
+		 o = s.taboption("settings", form.Value, "port", _("Local Port"), 
+		 	_("Smartdns local server port, smartdns will be automatically set as main dns when the port is 53."));
 		 o.placeholder = 53;
 		 o.default = 53;
 		 o.datatype = "port";
@@ -269,7 +270,7 @@
 		 o.default = o.disabled;
  
 		 // Force AAAA SOA
-		 o = s.taboption("seconddns", form.Flag, "force_aaaa_soa", _("Force AAAA SOA"), _("Force AAAA SOA."));
+		 o = s.taboption("seconddns", form.Flag, "seconddns_force_aaaa_soa", _("Force AAAA SOA"), _("Force AAAA SOA."));
 		 o.rmempty = false;
 		 o.default = o.disabled;
  

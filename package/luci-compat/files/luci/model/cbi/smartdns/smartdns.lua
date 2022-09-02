@@ -45,7 +45,8 @@ o.datatype    = "hostname"
 o.rempty      = false
 
 ---- Port
-o = s:taboption("settings", Value, "port", translate("Local Port"), translate("Smartdns local server port"))
+o = s:taboption("settings", Value, "port", translate("Local Port"), 
+    translate("Smartdns local server port, smartdns will be automatically set as main dns when the port is 53."))
 o.placeholder = 53
 o.default     = 53
 o.datatype    = "port"
@@ -144,7 +145,7 @@ o = s:taboption("settings", Value, "rr_ttl_max", translate("Domain TTL Max"), tr
 o.rempty      = true
 
 ---- rr-ttl-reply-max
-o = s:taboption("settings", Value, "rr_ttl_reply_max", translate("Domain TTL Max"), translate("Reply maximum TTL for all domain result."))
+o = s:taboption("settings", Value, "rr_ttl_reply_max", translate("Reply Domain TTL Max"), translate("Reply maximum TTL for all domain result."))
 o.rempty      = true
 
 ---- second dns server
@@ -230,7 +231,7 @@ o.cfgvalue    = function(...)
 end
 
 ---- Force AAAA SOA
-o = s:taboption("seconddns", Flag, "force_aaaa_soa", translate("Force AAAA SOA"), translate("Force AAAA SOA."))
+o = s:taboption("seconddns", Flag, "seconddns_force_aaaa_soa", translate("Force AAAA SOA"), translate("Force AAAA SOA."))
 o.rmempty     = false
 o.default     = o.disabled
 o.cfgvalue    = function(...)
