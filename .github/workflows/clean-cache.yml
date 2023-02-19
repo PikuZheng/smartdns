@@ -1,0 +1,25 @@
+name: Clear Cache
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # Runs once a day (https://crontab.guru/once-a-day)
+  workflow_dispatch:
+
+jobs:
+  clear:
+    name: Clear cache
+    runs-on: ubuntu-latest
+    steps:
+    - name: Clear cache
+      uses: MyAlbum/purge-cache@v1
+      with:
+        max-age: 1
+        token: ${{ secrets.TOKEN }}
+
+    - name: Delete workflow runs
+      uses: Mattraks/delete-workflow-runs@v2
+      with:
+        token: ${{ secrets.TOKEN }}
+        repository: ${{ github.repository }}
+        retain_days: 7
+        keep_minimum_runs: 7
