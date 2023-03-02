@@ -116,8 +116,8 @@ jobs:
             sdk_url_path: https://downloads.openwrt.org/releases/${{ env.OPENWRT_RELEASE }}/targets/mpc85xx/p1010
             sdk_name: -sdk-${{ env.OPENWRT_RELEASE }}-mpc85xx-p1010_
           - arch: arc_archs
-             sdk_url_path: https://downloads.openwrt.org/releases/${{ env.OPENWRT_RELEASE }}/targets/archs38/generic
-             sdk_name: -sdk-${{ env.OPENWRT_RELEASE }}-archs38-generic_
+            sdk_url_path: https://downloads.openwrt.org/releases/${{ env.OPENWRT_RELEASE }}/targets/archs38/generic
+            sdk_name: -sdk-${{ env.OPENWRT_RELEASE }}-archs38-generic_
 
     env:
       SDK_URL_PATH: ${{ matrix.sdk_url_path }}
