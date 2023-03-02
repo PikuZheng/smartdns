@@ -1,4 +1,4 @@
-name: Test Build Openwrt
+name: Test Build Openwrt Stable
 
 on:
   push:
