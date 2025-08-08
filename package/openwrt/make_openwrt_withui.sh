@@ -26,7 +26,7 @@ BLACKLIST_IP_CONF=$CURR_DIR/blacklist-ip.conf
 CUSTOM_CONF=$CURR_DIR/custom.conf
 DOMAIN_BLOCK_LIST=$CURR_DIR/domain-block.list
 DOMAIN_FORWARDING_LIST=$CURR_DIR/domain-forwarding.list
-SMARTDNS_UI_LIB=$SMARTDNS_DIR/plugin/smartdns-ui/libsmartdns_ui.so
+SMARTDNS_UI_LIB=$SMARTDNS_DIR/plugin/smartdns-ui/smartdns_ui.so
 SMARTDNS_OPENSSL_DIR=$SMARTDNS_DIR/openssl
 SMARTDNS_WEBUI_DIR=$SMARTDNS_DIR/smartdns-webui/out
 
