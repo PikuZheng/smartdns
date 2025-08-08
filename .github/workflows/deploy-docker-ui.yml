@@ -101,19 +101,19 @@ jobs:
             export AWS_LC_SYS_INCLUDES=/usr/arm-linux-gnueabihf/include
             cargo add aws-lc-sys --features bindgen
             cargo build --release --target=armv7-unknown-linux-musleabihf
-            cp ./target/armv7-unknown-linux-musleabihf/release/libsmartdns_ui.so ./
+            cp ./target/armv7-unknown-linux-musleabihf/release/libsmartdns_ui.so ./smartdns_ui.so
             cp /usr/local/musl/armv7-unknown-linux-musleabihf/lib/libgcc_s.so.1 ./
           else
             cargo build --release --target=$GOARCH-unknown-linux-musl
-            cp ./target/$GOARCH-unknown-linux-musl/release/libsmartdns_ui.so ./
+            cp ./target/$GOARCH-unknown-linux-musl/release/libsmartdns_ui.so ./smartdns_ui.so
             cp /usr/local/musl/$GOARCH-unknown-linux-musl/lib/libgcc_s.so.1 ./
           fi
-          musl-strip libsmartdns_ui.so && musl-strip ../../src/smartdns && musl-strip ../../openssl/libcrypto.so.3 && musl-strip ../../openssl/libssl.so.3 && musl-strip libgcc_s.so.1 || true
+          musl-strip smartdns_ui.so && musl-strip ../../src/smartdns && musl-strip ../../openssl/libcrypto.so.3 && musl-strip ../../openssl/libssl.so.3 && musl-strip libgcc_s.so.1 || true
           EOF
           if  test "$GOARCH" = "armv7" ;then
-            docker run -i --rm -v ${{ github.workspace }}:/workdir messense/rust-musl-cross:armv7-musleabihf sh /workdir/docker-build.sh
+            docker run -i --rm -v ${{ github.workspace }}:/workdir ghcr.io/rust-cross/rust-musl-cross:armv7-musleabihf sh /workdir/docker-build.sh
           else
-            docker run -i --rm -v ${{ github.workspace }}:/workdir messense/rust-musl-cross:$GOARCH-musl sh /workdir/docker-build.sh
+            docker run -i --rm -v ${{ github.workspace }}:/workdir ghcr.io/rust-cross/rust-musl-cross:$GOARCH-musl sh /workdir/docker-build.sh
           fi
           cd ${{ github.workspace }}
           cat >> Dockerfile.unknown << 'EOF'
