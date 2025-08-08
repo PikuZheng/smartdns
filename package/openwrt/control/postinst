@@ -19,8 +19,12 @@ chmod +x /usr/sbin/smartdns
 chmod +x /etc/init.d/smartdns
 mkdir -p /var/etc/smartdns/
 
-if [ -f /usr/lib/libsmartdns_ui.so ]; then
-    ln -sf /usr/lib/libsmartdns_ui.so /usr/lib/smartdns_ui.so
+if [ -f /usr/lib/smartdns_ui.so ]; then
+    ln -sf /usr/lib/smartdns_ui.so /usr/lib/libsmartdns_ui.so
+    if [ ! -f /usr/lib/smartdns/libsmartdns_ui.so ]; then
+        mkdir -p /usr/lib/smartdns/
+        ln -sf /usr/lib/smartdns_ui.so /usr/lib/smartdns/libsmartdns_ui.so
+    fi
 fi
 
 [ "${IPKG_NO_SCRIPT}" = "1" ] && exit 0
