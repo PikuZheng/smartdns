@@ -35,7 +35,7 @@ jobs:
     needs: get-version
     strategy:
       matrix:
-        goarch: [x86_64, powerpc64le, mipsel, mips, i686, aarch64, armv7l, mips-sf]
+        goarch: [x86_64, powerpc64le, mipsel, mips, i686, aarch64, armv7l, mips-sf, mipsel-sf]
       fail-fast: false
     runs-on: ubuntu-latest
     env:
@@ -58,7 +58,7 @@ jobs:
           cat >> docker-build.sh << EOF
           apk add perl make coreutils tar pkgconfig dpkg binutils
           cd /workdir/openssl
-          if [ "$GOARCH" == "mipsel" ] || [ "$GOARCH" == "mips" ] || [ "$GOARCH" == "mips-sf" ] ;then
+          if [ "$GOARCH" == "mipsel" ] || [ "$GOARCH" == "mips" ] || [ "$GOARCH" == "mips-sf" ] || [ "$GOARCH" == "mipsel-sf" ] ;then
             ./Configure no-tests linux-mips32 enable-quic enable-ktls no-docs
           elif [ "$GOARCH" == "i686" ] ;then
             ./Configure no-tests linux-x86 enable-quic enable-ktls no-docs
@@ -92,6 +92,9 @@ jobs:
           elif [ "$GOARCH" == "mips-sf" ] ;then
             sed -i 's|^export STRIP.*|export STRIP=/mips-linux-muslsf/bin/strip|' ./package/build-pkg.sh
             docker run -i --rm -v ${{ github.workspace }}:/workdir muslcc/x86_64:mips-linux-muslsf sh /workdir/docker-build.sh
+          elif [ "$GOARCH" == "mipsel-sf" ] ;then
+            sed -i 's|^export STRIP.*|export STRIP=/mipsel-linux-muslsf/bin/strip|' ./package/build-pkg.sh
+            docker run -i --rm -v ${{ github.workspace }}:/workdir muslcc/x86_64:mipsel-linux-muslsf sh /workdir/docker-build.sh
           else
             sed -i 's|^export STRIP.*|export STRIP=/$GOARCH-linux-musl/bin/strip|' ./package/build-pkg.sh
             docker run -i --rm -v ${{ github.workspace }}:/workdir muslcc/x86_64:$GOARCH-linux-musl sh /workdir/docker-build.sh
