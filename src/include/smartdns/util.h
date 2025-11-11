@@ -42,7 +42,7 @@ extern "C" {
 #define TCP_THIN_DUPACK 17
 #endif
 
-#define PORT_NOT_DEFINED -1
+#define PORT_NOT_DEFINED (-1)
 #define MAX_IP_LEN 64
 
 #define IPV6_ADDR_LEN 16
@@ -114,8 +114,6 @@ char *reverse_string(char *output, const char *input, int len, int to_lower_case
 
 char *to_lower_case(char *output, const char *input, int len);
 
-void print_stack(void);
-
 int ipset_add(const char *ipset_name, const unsigned char addr[], int addr_len, unsigned long timeout);
 
 int ipset_del(const char *ipset_name, const unsigned char addr[], int addr_len);
@@ -136,7 +134,8 @@ int SSL_base64_decode_ext(const char *in, unsigned char *out, int max_outlen, in
 
 int SSL_base64_encode(const void *in, int in_len, char *out);
 
-int generate_cert_key(const char *key_path, const char *cert_path, const char *root_key_path, const char *san, int days);
+int generate_cert_key(const char *key_path, const char *cert_path, const char *root_key_path, const char *san,
+					  int days);
 
 int generate_cert_san(char *san, int max_san_len, const char *append_san);
 
