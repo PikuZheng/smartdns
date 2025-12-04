@@ -16,23 +16,19 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef _DNS_SERVER_HTTPS_
-#define _DNS_SERVER_HTTPS_
+#ifndef _DNS_SERVER_DDR_H
+#define _DNS_SERVER_DDR_H
 
 #include "dns_server.h"
-#include <sys/epoll.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif /*__cplusplus */
 
-int _dns_server_reply_http_error(struct dns_server_conn_tcp_client *tcpclient, int code, const char *code_msg,
-								 const char *message);
-
-int _dns_server_reply_https(struct dns_request *request, struct dns_server_conn_tcp_client *tcpclient, void *packet,
-							unsigned short len);
+int _dns_server_process_DDR(struct dns_request *request);
 
 #ifdef __cplusplus
 }
 #endif /*__cplusplus */
-#endif
+
+#endif // _DNS_SERVER_DDR_H

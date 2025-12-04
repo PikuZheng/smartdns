@@ -16,23 +16,40 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef _DNS_SERVER_HTTPS_
-#define _DNS_SERVER_HTTPS_
+#ifndef _DNS_CLIENT_HTTP2_H
+#define _DNS_CLIENT_HTTP2_H
 
-#include "dns_server.h"
+#include "dns_client.h"
+#include "server_info.h"
+
 #include <sys/epoll.h>
 
 #ifdef __cplusplus
 extern "C" {
-#endif /*__cplusplus */
+#endif
 
-int _dns_server_reply_http_error(struct dns_server_conn_tcp_client *tcpclient, int code, const char *code_msg,
-								 const char *message);
+/**
+ * Send DNS query over HTTP/2
+ * @param server_info Server information
+ * @param query DNS query structure
+ * @param packet DNS query packet
+ * @param len Packet length
+ * @return 0 on success, -1 on error
+ */
+int _dns_client_send_http2(struct dns_server_info *server_info, struct dns_query_struct *query, void *packet,
+						   unsigned short len);
 
-int _dns_server_reply_https(struct dns_request *request, struct dns_server_conn_tcp_client *tcpclient, void *packet,
-							unsigned short len);
+/**
+ * Process HTTP/2 for a server (handles handshake and all streams)
+ * @param server_info Server information
+ * @param event Epoll event
+ * @param now Current time
+ * @return 0 on success, -1 on error
+ */
+int _dns_client_process_http2(struct dns_server_info *server_info, struct epoll_event *event, unsigned long now);
 
 #ifdef __cplusplus
 }
-#endif /*__cplusplus */
 #endif
+
+#endif /* _DNS_CLIENT_HTTP2_H */
