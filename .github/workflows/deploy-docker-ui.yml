@@ -49,7 +49,7 @@ jobs:
           #修改版本号
           sed -i "s/VER=.*/VER=${{needs.get-version.outputs.CUR_VERSION}}/" ${{ github.workspace }}/package/build-pkg.sh
           mkdir -p ${{ github.workspace }}/openssl
-          curl -sSL https://github.com/openssl/openssl/releases/download/openssl-3.5.2/openssl-3.5.2.tar.gz -o openssl.tar.gz
+          curl -sSL https://github.com/openssl/openssl/releases/download/openssl-3.5.4/openssl-3.5.4.tar.gz -o openssl.tar.gz
           tar -zxvf openssl.tar.gz --strip-components 1 -C openssl
           rm docker-openssl.sh || true
           cat >> docker-openssl.sh << EOF
@@ -117,7 +117,7 @@ jobs:
           fi
           cd ${{ github.workspace }}
           cat >> Dockerfile.unknown << 'EOF'
-          FROM alpine:3.22
+          FROM alpine:3.23
           ENV TZ="Asia/Shanghai"
           COPY ./src/smartdns /usr/sbin
           COPY ./openssl/libcrypto.so ./openssl/libssl.so ./plugin/smartdns-ui/libsmartdns_ui.so ./plugin/smartdns-ui/libgcc_s.so.1 /usr/lib

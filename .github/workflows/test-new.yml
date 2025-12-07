@@ -53,7 +53,7 @@ jobs:
           sed -i "s/VER=.*/VER=${{needs.get-version.outputs.CUR_VERSION}}/" ${{ github.workspace }}/package/build-pkg.sh
           
           mkdir -p openssl
-          curl -sSL https://github.com/openssl/openssl/releases/download/openssl-3.5.2/openssl-3.5.2.tar.gz -o openssl.tar.gz
+          curl -sSL https://github.com/openssl/openssl/releases/download/openssl-3.5.4/openssl-3.5.4.tar.gz -o openssl.tar.gz
           tar -zxvf openssl.tar.gz --strip-components 1 -C openssl
           cat >> docker-build.sh << EOF
           apk add perl make coreutils tar pkgconfig dpkg binutils

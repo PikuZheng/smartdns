@@ -1,5 +1,5 @@
-FROM --platform=$TARGETPLATFORM alpine:3.22 as smartdns-builder
-# alpine 3.22 自带openssl 3.5.0
+FROM --platform=$TARGETPLATFORM alpine:3.23 as smartdns-builder
+# alpine 3.23 自带openssl 3.5.4
 LABEL previous-stage=smartdns
 # 添加标签，镜像生成后可使用 docker rmi `docker images --filter label=previous-stage=smartdns -q` 删除中间层
 COPY . /smartdns/
@@ -13,7 +13,7 @@ RUN apk update && \
     mkdir -p /release/etc/smartdns/ && \
     cp /smartdns/src/smartdns /release/usr/sbin/
 
-FROM --platform=$TARGETPLATFORM alpine:3.22
+FROM --platform=$TARGETPLATFORM alpine:3.23
 ENV TZ="Asia/Shanghai"
 COPY --from=smartdns-builder /release/ /
 EXPOSE 53/udp 53/tcp
