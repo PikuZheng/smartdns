@@ -127,7 +127,7 @@ jobs:
           RUN ln -sf /usr/lib/libsmartdns_ui.so /usr/lib/smartdns_ui.so
           EXPOSE 53/udp 53/tcp 6080/tcp
           VOLUME "/etc/smartdns/"
-          HEALTHCHECK --interval=5m CMD test $(nslookup dns.pub 127.0.0.1 |grep answer |wc -l) -gt 0
+          HEALTHCHECK --interval=5m --timeout=2s --start-period=5s CMD test $(nslookup dns.pub 127.0.0.1 |grep answer |wc -l) -gt 0
           CMD ["/usr/sbin/smartdns", "-f", "-x", "-p -"]
           EOF
           docker login --username=${{ secrets.DOCKER_USERNAME }} --password='${{ secrets.DOCKER_PASSWORD }}'
