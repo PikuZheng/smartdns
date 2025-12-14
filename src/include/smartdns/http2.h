@@ -86,13 +86,7 @@ struct http2_ctx *http2_ctx_server_new(const char *server, http2_bio_read_fn bio
 									   void *private_data, const struct http2_settings *settings);
 
 /**
- * Free an HTTP/2 context
- * @param ctx Context to free
- */
-void http2_ctx_free(struct http2_ctx *ctx);
-
-/**
- * Close an HTTP/2 context and release all streams
+ * Close an HTTP/2 context, release all streams and release ownership.
  * This is used to break circular references between context and streams
  * @param ctx Context to close
  */
@@ -103,14 +97,14 @@ void http2_ctx_close(struct http2_ctx *ctx);
  * @param ctx HTTP/2 context
  * @return The same context pointer
  */
-struct http2_ctx *http2_ctx_ref(struct http2_ctx *ctx);
+struct http2_ctx *http2_ctx_get(struct http2_ctx *ctx);
 
 /**
  * Decrease reference count of HTTP/2 context
  * Frees the context when reference count reaches zero
  * @param ctx HTTP/2 context
  */
-void http2_ctx_unref(struct http2_ctx *ctx);
+void http2_ctx_put(struct http2_ctx *ctx);
 
 /**
  * Perform HTTP/2 handshake (SETTINGS exchange)
@@ -135,6 +129,16 @@ struct http2_stream *http2_ctx_accept_stream(struct http2_ctx *ctx);
  * @return 0 on success, -1 on error
  */
 int http2_ctx_poll(struct http2_ctx *ctx, struct http2_poll_item *items, int max_items, int *ret_count);
+
+/**
+ * Poll streams for readiness (only readable streams)
+ * @param ctx HTTP/2 context
+ * @param items Array to fill with poll results
+ * @param max_items Maximum number of items to return
+ * @param ret_count Output: number of items returned
+ * @return 0 on success, -1 on error
+ */
+int http2_ctx_poll_readable(struct http2_ctx *ctx, struct http2_poll_item *items, int max_items, int *ret_count);
 
 /**
  * Check if context wants to read (EAGAIN on last read)
@@ -171,6 +175,11 @@ struct http2_stream *http2_stream_new(struct http2_ctx *ctx);
  * @param stream Stream to free
  */
 
+/**
+ * Close a stream and release ownership
+ * @param stream Stream to close
+ */
+void http2_stream_close(struct http2_stream *stream);
 
 /**
  * Increase reference count of stream
