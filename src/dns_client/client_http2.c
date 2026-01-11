@@ -116,8 +116,6 @@ static void _dns_client_release_stream_on_error(struct dns_server_info *server_i
 		_dns_client_conn_stream_put(stream);
 	}
 
-
-
 	pthread_mutex_unlock(&server_info->lock);
 
 	/* Release the initial reference from creation */
@@ -512,7 +510,12 @@ static int _dns_client_http2_process_read(struct dns_server_info *server_info)
 			}
 
 			conn_stream = (struct dns_conn_stream *)http2_stream_get_ex_data(stream);
-			if (conn_stream != NULL && poll_items[i].readable) {
+			if (conn_stream == NULL) {
+				http2_stream_put(stream);
+				continue;
+			}
+
+			if (poll_items[i].readable) {
 				int stream_ended = _dns_client_http2_process_stream_one(server_info, conn_stream);
 				if (stream_ended) {
 					int need_put = 0;
@@ -530,17 +533,6 @@ static int _dns_client_http2_process_read(struct dns_server_info *server_info)
 				}
 			}
 			http2_stream_put(stream);
-		}
-
-		if (ret < 0) {
-			if (ret == HTTP2_ERR_EAGAIN) {
-				break;
-			}
-			if (ret != HTTP2_ERR_EOF) {
-				tlog(TLOG_DEBUG, "http2 poll failed, ret=%d", ret);
-			}
-			http2_ctx_put(http2_ctx);
-			return -1;
 		}
 
 		if (poll_count < 128) {
