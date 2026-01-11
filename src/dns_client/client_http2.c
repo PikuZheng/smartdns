@@ -116,16 +116,7 @@ static void _dns_client_release_stream_on_error(struct dns_server_info *server_i
 		_dns_client_conn_stream_put(stream);
 	}
 
-	/* Remove from query list and release reference */
-	if (!list_empty(&stream->query_list)) {
-		if (stream->query) {
-			pthread_mutex_lock(&stream->query->lock);
-			list_del_init(&stream->query_list);
-			pthread_mutex_unlock(&stream->query->lock);
-			stream->query = NULL;
-		}
-		_dns_client_conn_stream_put(stream);
-	}
+
 
 	pthread_mutex_unlock(&server_info->lock);
 
@@ -136,12 +127,12 @@ static void _dns_client_release_stream_on_error(struct dns_server_info *server_i
 /* Helper function to flush pending HTTP/2 writes */
 static void _dns_client_flush_http2_writes(struct http2_ctx *http2_ctx)
 {
-	struct http2_poll_item poll_items[1];
-	int poll_count = 0;
 	int loop = 0;
 
 	while (http2_ctx_want_write(http2_ctx) && loop++ < 10) {
-		http2_ctx_poll(http2_ctx, poll_items, 1, &poll_count);
+		if (http2_ctx_poll(http2_ctx, NULL, 0, NULL) < 0) {
+			break;
+		}
 	}
 }
 
@@ -318,11 +309,11 @@ int _dns_client_send_http2(struct dns_server_info *server_info, struct dns_query
 	pthread_mutex_unlock(&server_info->lock);
 
 	/* Flush data immediately */
-	struct http2_poll_item poll_items[1];
-	int poll_count = 0;
 	int loop = 0;
 	while (http2_ctx_want_write(http2_ctx) && loop++ < 10) {
-		http2_ctx_poll(http2_ctx, poll_items, 1, &poll_count);
+		if (http2_ctx_poll(http2_ctx, NULL, 0, NULL) < 0) {
+			break;
+		}
 	}
 
 	/* Check if there's pending write data, if so add EPOLLOUT event */
@@ -521,12 +512,7 @@ static int _dns_client_http2_process_read(struct dns_server_info *server_info)
 			}
 
 			conn_stream = (struct dns_conn_stream *)http2_stream_get_ex_data(stream);
-			if (conn_stream == NULL) {
-				http2_stream_put(stream);
-				continue;
-			}
-
-			if (poll_items[i].readable) {
+			if (conn_stream != NULL && poll_items[i].readable) {
 				int stream_ended = _dns_client_http2_process_stream_one(server_info, conn_stream);
 				if (stream_ended) {
 					int need_put = 0;
@@ -544,6 +530,17 @@ static int _dns_client_http2_process_read(struct dns_server_info *server_info)
 				}
 			}
 			http2_stream_put(stream);
+		}
+
+		if (ret < 0) {
+			if (ret == HTTP2_ERR_EAGAIN) {
+				break;
+			}
+			if (ret != HTTP2_ERR_EOF) {
+				tlog(TLOG_DEBUG, "http2 poll failed, ret=%d", ret);
+			}
+			http2_ctx_put(http2_ctx);
+			return -1;
 		}
 
 		if (poll_count < 128) {
