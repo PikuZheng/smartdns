@@ -1,0 +1,55 @@
+name: Update OpenSSL version
+
+on:
+  schedule:
+    - cron: "0 3 * * *"   # 每天 UTC 03:00
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update-openssl:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Get latest OpenSSL stable version
+        id: openssl
+        run: |
+          latest_tag=$(curl -s \
+            https://api.github.com/repos/openssl/openssl/releases \
+            | jq -r '.[] | select(.tag_name | test("^openssl-3\\.5\\.")) | .tag_name' \
+            | head -n 1)
+
+          echo "Latest tag: $latest_tag"
+          echo "version=$latest_tag" >> "$GITHUB_OUTPUT"
+
+      - name: Update deploy-docker-ui.yml
+        run: |
+          FILE="smartdns/.github/workflows/deploy-docker-ui.yml"
+          NEW_VER="${{ steps.openssl.outputs.version }}"
+
+          if ! grep -q "$NEW_VER" "$FILE"; then
+            sed -i -E \
+              "s/openssl-[0-9]+\.[0-9]+\.[0-9]+/$NEW_VER/g" \
+              "$FILE"
+          else
+            echo "Already using latest OpenSSL version"
+            exit 0
+          fi
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: "chore: update OpenSSL to ${{ steps.openssl.outputs.version }}"
+          title: "chore: update OpenSSL to ${{ steps.openssl.outputs.version }}"
+          body: |
+            Automated update of OpenSSL to the latest stable release.
+
+            Source: https://github.com/openssl/openssl/releases
+          branch: bot/update-openssl
+          delete-branch: true
