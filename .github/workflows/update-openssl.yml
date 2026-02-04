@@ -30,7 +30,7 @@ jobs:
 
       - name: Update deploy-docker-ui.yml
         run: |
-          FILE="smartdns/.github/workflows/deploy-docker-ui.yml"
+          FILE="${{ github.workspace }}/.github/workflows/deploy-docker-ui.yml"
           NEW_VER="${{ steps.openssl.outputs.version }}"
 
           if ! grep -q "$NEW_VER" "$FILE"; then
