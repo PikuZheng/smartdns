@@ -142,6 +142,15 @@ pub struct ClientListGetParam {
     pub cursor: Option<ClientListGetParamCursor>,
 }
 
+#[derive(Debug, Clone)]
+pub struct TopFilteredDomainData {
+    pub ip: String,
+    pub filter_type: String,  // "black-list" or "ignore-list"
+    pub hit_count: u32,
+    pub timestamp_start: u64,
+    pub timestamp_end: u64,
+}
+
 impl ClientListGetParam {
     pub fn new() -> Self {
         ClientListGetParam {
@@ -204,7 +213,7 @@ impl DB {
     pub fn new() -> Self {
         DB {
             conn: Mutex::new(None),
-            version: 10000, /* x: major version, xx: minor version, xx: patch version */
+            version: 10200, /* x: major version, xx: minor version, xx: patch version */
             query_plan: std::env::var("SMARTDNS_DEBUG_SQL").is_ok(),
         }
     }
@@ -279,6 +288,18 @@ impl DB {
                 count INTEGER DEFAULT 0,
                 timestamp_start BIGINT DEFAULT 0,
                 timestamp_end BIGINT DEFAULT 0
+            );",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS top_filtered_domain_data (
+                ip TEXT NOT NULL,
+                filter_type TEXT NOT NULL,
+                hit_count INTEGER DEFAULT 0,
+                timestamp_start BIGINT DEFAULT 0,
+                timestamp_end BIGINT DEFAULT 0,
+                PRIMARY KEY (ip, filter_type)
             );",
             [],
         )?;
@@ -1329,6 +1350,177 @@ pub fn refresh_domain_top_blocked_list(&self, timestamp: u64) -> Result<(), Box<
     tx.commit()?;
     Ok(())
 }
+    // Periodic refresh method similar to refresh_client_top_list and refresh_domain_top_list
+    pub fn refresh_filtered_domain_top_list(&self, timestamp: u64) -> Result<(), Box<dyn Error>> {
+        let mut filtered_ip_count_map = HashMap::new();
+        let conn = match self.get_readonly_conn() {
+            Some(v) => v,
+            None => return Err("db is not open".into()),
+        };
+
+        let timestamp_now = smartdns::get_utc_time_ms();
+
+        // Aggregate filtered IPs by filter_type from filtered_domain table
+        let sql = "SELECT filtered_ips, filter_type FROM filtered_domain WHERE timestamp >= ? ORDER BY timestamp DESC";
+        self.debug_query_plan(&conn, sql.to_string(), &vec![timestamp.to_string()]);
+        
+        let mut stmt = conn.prepare(sql)?;
+        let rows = stmt.query_map([timestamp.to_string()], |row| {
+            let ips: String = row.get(0)?;
+            let filter_type: String = row.get(1)?;
+            Ok((ips, filter_type))
+        })?;
+
+        if let Ok(rows) = rows {
+            for row in rows {
+                if let Ok((ips, filter_type)) = row {
+                    // Parse comma-separated IPs
+                    for ip in ips.split(',') {
+                        let ip = ip.trim().to_string();
+                        if !ip.is_empty() {
+                            let key = (ip, filter_type.clone());
+                            *filtered_ip_count_map.entry(key).or_insert(0) += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Convert HashMap to Vec of TopFilteredDomainData, sorted by count
+        let mut filtered_list: Vec<(String, String, u32)> = filtered_ip_count_map
+            .iter()
+            .map(|((ip, filter_type), count)| (ip.clone(), filter_type.clone(), *count))
+            .collect();
+
+        // Sort by count descending and take top 20
+        filtered_list.sort_by(|a, b| b.2.cmp(&a.2));
+        filtered_list.truncate(20);
+
+        dns_log!(
+            LogLevel::DEBUG,
+            "refresh filtered domain top list, count: {}",
+            filtered_list.len()
+        );
+
+        let mut conn = self.conn.lock().unwrap();
+        if conn.as_ref().is_none() {
+            return Err("db is not open".into());
+        }
+
+        let conn = conn.as_mut().unwrap();
+        let tx = conn.transaction()?;
+
+        // Clear old data
+        let mut stmt = tx.prepare("DELETE FROM top_filtered_domain_data")?;
+        stmt.execute([])?;
+        stmt.finalize()?;
+
+        // Insert new aggregated data
+        let mut stmt = tx.prepare(
+            "INSERT INTO top_filtered_domain_data (ip, filter_type, hit_count, timestamp_start, timestamp_end) 
+             VALUES (?1, ?2, ?3, ?4, ?5)"
+        )?;
+
+        for (ip, filter_type, hit_count) in &filtered_list {
+            stmt.execute(rusqlite::params![
+                ip,
+                filter_type,
+                hit_count,
+                timestamp,
+                timestamp_now
+            ])?;
+
+            dns_log!(
+                LogLevel::DEBUG,
+                "ip: {}, filter_type: {}, hit_count: {}, timestamp_start: {}, timestamp_end: {}",
+                ip,
+                filter_type,
+                hit_count,
+                timestamp,
+                timestamp_now
+            );
+        }
+
+        stmt.finalize()?;
+        tx.commit()?;
+
+        Ok(())
+    }
+
+    // Query method similar to get_client_top_list
+    pub fn get_filtered_domain_top_list(&self, count: u32) -> Result<Vec<TopFilteredDomainData>, Box<dyn Error>> {
+        let mut ret = Vec::new();
+        let conn = self.get_readonly_conn();
+        if conn.as_ref().is_none() {
+            return Err("db is not open".into());
+        }
+
+        let conn = conn.as_ref().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT ip, filter_type, hit_count, timestamp_start, timestamp_end 
+             FROM top_filtered_domain_data 
+             ORDER BY hit_count DESC 
+             LIMIT ?"
+        )?;
+
+        let rows = stmt.query_map([count.to_string()], |row| {
+            Ok(TopFilteredDomainData {
+                ip: row.get(0)?,
+                filter_type: row.get(1)?,
+                hit_count: row.get(2)?,
+                timestamp_start: row.get(3)?,
+                timestamp_end: row.get(4)?,
+            })
+        })?;
+
+        if let Ok(rows) = rows {
+            for row in rows {
+                if let Ok(row) = row {
+                    ret.push(row);
+                }
+            }
+        }
+
+        Ok(ret)
+    }
+
+    // Query filtered IPs by filter_type only
+    pub fn get_filtered_domain_by_type(&self, filter_type: &str, count: u32) -> Result<Vec<TopFilteredDomainData>, Box<dyn Error>> {
+        let mut ret = Vec::new();
+        let conn = self.get_readonly_conn();
+        if conn.as_ref().is_none() {
+            return Err("db is not open".into());
+        }
+
+        let conn = conn.as_ref().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT ip, filter_type, hit_count, timestamp_start, timestamp_end 
+             FROM top_filtered_domain_data 
+             WHERE filter_type = ? 
+             ORDER BY hit_count DESC 
+             LIMIT ?"
+        )?;
+
+        let rows = stmt.query_map(rusqlite::params![filter_type, count.to_string()], |row| {
+            Ok(TopFilteredDomainData {
+                ip: row.get(0)?,
+                filter_type: row.get(1)?,
+                hit_count: row.get(2)?,
+                timestamp_start: row.get(3)?,
+                timestamp_end: row.get(4)?,
+            })
+        })?;
+
+        if let Ok(rows) = rows {
+            for row in rows {
+                if let Ok(row) = row {
+                    ret.push(row);
+                }
+            }
+        }
+
+        Ok(ret)
+    }
 
     pub fn get_domain_top_list(&self, count: u32) -> Result<Vec<DomainQueryCount>, Box<dyn Error>> {
         let mut ret = Vec::new();

@@ -540,6 +540,21 @@ impl DataServer {
         self.db.insert_domain(&list)
     }
 
+    pub fn get_top_filtered_domain_list(
+        &self,
+        count: Option<u32>,
+    ) -> Result<Vec<TopFilteredDomainData>, Box<dyn Error>> {
+        self.db.get_filtered_domain_top_list(count.unwrap_or(10))
+    }
+
+    pub fn get_top_filtered_domain_by_type(
+        &self,
+        filter_type: &str,
+        count: Option<u32>,
+    ) -> Result<Vec<TopFilteredDomainData>, Box<dyn Error>> {
+        self.db.get_filtered_domain_by_type(filter_type, count.unwrap_or(10))
+    }
+
     async fn data_server_handle_dns_request(
         this: Arc<DataServer>,
         req_list: &Vec<Box<dyn DnsRequest>>,

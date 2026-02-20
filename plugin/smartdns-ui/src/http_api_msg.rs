@@ -1007,3 +1007,72 @@ pub fn api_msg_parse_whois_info(data: &str) -> Result<WhoIsInfo, Box<dyn Error>>
         country: country.unwrap().to_string(),
     })
 }
+
+pub fn api_msg_gen_top_filtered_domain_list(filtered_list: &Vec<TopFilteredDomainData>) -> String {
+    let json_str = json!({
+        "filtered_top_list":
+            filtered_list
+                .iter()
+                .map(|x| {
+                    let s = json!({
+                        "ip": x.ip,
+                        "filter_type": x.filter_type,
+                        "hit_count": x.hit_count,
+                        "timestamp_start": x.timestamp_start,
+                        "timestamp_end": x.timestamp_end,
+                    });
+                    s
+                })
+                .collect::<Vec<serde_json::Value>>()
+    });
+
+    json_str.to_string()
+}
+
+pub fn api_msg_parse_top_filtered_domain_list(
+    data: &str,
+) -> Result<Vec<TopFilteredDomainData>, Box<dyn Error>> {
+    let v: serde_json::Value = serde_json::from_str(data)?;
+    let mut filtered_list = Vec::new();
+    let top_list = v["filtered_top_list"].as_array();
+    if top_list.is_none() {
+        return Err("filtered_top_list not found".into());
+    }
+
+    for item in top_list.unwrap() {
+        let ip = item["ip"].as_str();
+        if ip.is_none() {
+            return Err("ip not found".into());
+        }
+
+        let filter_type = item["filter_type"].as_str();
+        if filter_type.is_none() {
+            return Err("filter_type not found".into());
+        }
+
+        let hit_count = item["hit_count"].as_u64();
+        if hit_count.is_none() {
+            return Err("hit_count not found".into());
+        }
+
+        let timestamp_start = item["timestamp_start"].as_u64();
+        if timestamp_start.is_none() {
+            return Err("timestamp_start not found".into());
+        }
+
+        let timestamp_end = item["timestamp_end"].as_u64();
+        if timestamp_end.is_none() {
+            return Err("timestamp_end not found".into());
+        }
+
+        filtered_list.push(TopFilteredDomainData {
+            ip: ip.unwrap().to_string(),
+            filter_type: filter_type.unwrap().to_string(),
+            hit_count: hit_count.unwrap() as u32,
+            timestamp_start: timestamp_start.unwrap(),
+            timestamp_end: timestamp_end.unwrap(),
+        });
+    }
+
+    Ok(filtered_list)
+}

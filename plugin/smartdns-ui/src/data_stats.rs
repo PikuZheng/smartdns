@@ -451,6 +451,22 @@ impl DataStats {
         let _ = self
             .db
             .delete_daily_query_count_before_timestamp(90 * 24 * 3600 * 1000);
+
+        let ret = self.db.refresh_client_top_list(now - 7 * 24 * 3600 * 1000);
+        if let Err(e) = ret {
+            dns_log!(LogLevel::WARN, "refresh client top list error: {}", e);
+        }
+
+        let ret = self.db.refresh_domain_top_list(now - 7 * 24 * 3600 * 1000);
+        if let Err(e) = ret {
+            dns_log!(LogLevel::WARN, "refresh domain top list error: {}", e);
+        }
+
+        // Add this: Refresh filtered domain top list (last 24 hours)
+        let ret = self.db.refresh_filtered_domain_top_list(now - 24 * 3600 * 1000);
+        if let Err(e) = ret {
+            dns_log!(LogLevel::WARN, "refresh filtered domain top list error: {}", e);
+        }
     }
 
     async fn update_stats(self: &Arc<Self>) {

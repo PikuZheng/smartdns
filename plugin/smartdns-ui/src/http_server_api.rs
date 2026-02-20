@@ -107,6 +107,7 @@ impl API {
         api.register(Method::GET, "/api/whois", true, APIRoute!(API::api_whois));
         api.register(Method::GET, "/api/tool/term", true, APIRoute!(API::api_tool_term));
         api.register(Method::GET, "/api/stats/top/domain_blocked", true, APIRoute!(API::api_stats_get_top_domain_blocked));
+        api.register(Method::GET, "/api/stats/top/ip_blocked", true, APIRoute!(API::api_stats_get_top_filtered_ip));
         api
     }
 
@@ -1090,6 +1091,79 @@ impl API {
         API::response_build(StatusCode::OK, body)
     }
 
+    async fn api_stats_get_top_filtered_ip(
+        this: Arc<HttpServer>,
+        _param: APIRouteParam,
+        _req: Request<body::Incoming>,
+    ) -> Result<Response<Full<Bytes>>, HttpError> {
+        let data_server = this.get_data_server();
+        let params = API::get_params(&_req);
+        let count = API::params_get_value(&params, "count");
+
+        let ret = API::call_blocking(this, move || {
+            let ret = data_server.get_top_filtered_domain_list(count);
+            if let Err(e) = ret {
+                return Err(e.to_string());
+            }
+
+            let ret = ret.unwrap();
+            return Ok(ret);
+        })
+        .await;
+
+        if let Err(e) = ret {
+            return API::response_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string().as_str());
+        }
+
+        let ret = ret.unwrap();
+        if let Err(e) = ret {
+            return API::response_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string().as_str());
+        }
+
+        let body = api_msg_gen_top_filtered_domain_list(&ret.unwrap());
+        API::response_build(StatusCode::OK, body)
+    }
+
+    async fn api_stats_get_top_filtered_ip_by_type(
+        this: Arc<HttpServer>,
+        param: APIRouteParam,
+        _req: Request<body::Incoming>,
+    ) -> Result<Response<Full<Bytes>>, HttpError> {
+        let data_server = this.get_data_server();
+        let filter_type = API::params_get_value(&param, "filter_type");
+        let params = API::get_params(&_req);
+        let count = API::params_get_value(&params, "count");
+
+        if filter_type.is_none() {
+            return API::response_error(StatusCode::BAD_REQUEST, "filter_type parameter required");
+        }
+
+        let filter_type = filter_type.unwrap();
+
+        let ret = API::call_blocking(this, move || {
+            let ret = data_server.get_top_filtered_domain_by_type(&filter_type, count);
+            if let Err(e) = ret {
+                return Err(e.to_string());
+            }
+
+            let ret = ret.unwrap();
+            return Ok(ret);
+        })
+        .await;
+
+        if let Err(e) = ret {
+            return API::response_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string().as_str());
+        }
+
+        let ret = ret.unwrap();
+        if let Err(e) = ret {
+            return API::response_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string().as_str());
+        }
+
+        let body = api_msg_gen_top_filtered_domain_list(&ret.unwrap());
+        API::response_build(StatusCode::OK, body)
+    }
+
     async fn api_stats_get_metrics(
         this: Arc<HttpServer>,
         _param: APIRouteParam,
@@ -1281,3 +1355,4 @@ impl API {
         return Ok(ret);
     }
 }
+
