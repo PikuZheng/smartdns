@@ -51,6 +51,9 @@ jobs:
           mkdir -p ${{ github.workspace }}/openssl
           curl -sSL https://github.com/openssl/openssl/releases/download/openssl-3.5.5/openssl-3.5.5.tar.gz -o openssl.tar.gz
           tar -zxvf openssl.tar.gz --strip-components 1 -C openssl
+          mkdir -p ${{ github.workspace }}/jemalloc
+          curl -sSL  https://github.com/jemalloc/jemalloc/archive/refs/tags/5.3.0.tar.gz -o jemalloc.tar.gz
+          tar -zxvf jemalloc.tar.gz --strip-components 1 -C jemalloc
           rm docker-openssl.sh || true
           cat >> docker-openssl.sh << EOF
           apk add perl make coreutils tar pkgconfig dpkg binutils autoconf
@@ -66,17 +69,18 @@ jobs:
           elif [ "$GOARCH" == "armv7" ] ;then
             ./Configure no-tests linux-armv4 enable-quic enable-ktls no-docs
           else
-           ./Configure no-tests linux-$GOARCH enable-quic enable-ktls no-docs
+            ./Configure no-tests linux-$GOARCH enable-quic enable-ktls no-docs
           fi
           make clean && make all
-          cd /workdir
-          wget https://github.com/jemalloc/jemalloc/archive/refs/tags/5.3.0.tar.gz
-          tar xf 5.3.0.tar.gz
-          cd /workdir/jemalloc-5.3.0
-          ./autogen.sh && make
+          cd /workdir/jemalloc
+          if [ "$GOARCH" == "armv7" ] ;then
+            ./configure --host=armv7l-linux-musleabihf && make
+          else
+            ./configure --host=$GOARCH-linux-musl && make
+          fi
           cd /workdir
           export CFLAGS="-I /workdir/openssl/include"
-          export LDFLAGS="-L /workdir/openssl -L /workdir/jemalloc-5.3.0/lib -ljemalloc"
+          export LDFLAGS="-L /workdir/openssl -L /workdir/jemalloc/lib -ljemalloc"
           ./package/build-pkg.sh --platform linux --arch all --filearch $GOARCH-linux --outputdir /workdir/build
           EOF
           if  test "$GOARCH" = "armv7" ;then
@@ -115,7 +119,7 @@ jobs:
             cp /usr/local/musl/$GOARCH-unknown-linux-musl/lib/libgcc_s.so.1 ./
             cp /usr/local/musl/$GOARCH-unknown-linux-musl/lib/libstdc++.so.6 ./
           fi
-          musl-strip libsmartdns_ui.so && musl-strip ../../src/smartdns && musl-strip ../../openssl/libcrypto.so.3 && musl-strip ../../openssl/libssl.so.3 && musl-strip libgcc_s.so.1  && musl-strip ../../jemalloc-5.3.0/lib/libjemalloc.so.2  || true
+          musl-strip libsmartdns_ui.so && musl-strip ../../src/smartdns && musl-strip ../../openssl/libcrypto.so.3 && musl-strip ../../openssl/libssl.so.3 && musl-strip libgcc_s.so.1  && musl-strip ../../jemalloc/lib/libjemalloc.so.2  || true
           EOF
           if  test "$GOARCH" = "armv7" ;then
             docker run -i --rm -v ${{ github.workspace }}:/workdir messense/rust-musl-cross:armv7-musleabihf sh /workdir/docker-build.sh
@@ -127,7 +131,7 @@ jobs:
           FROM alpine:3.23
           ENV TZ="Asia/Shanghai"
           COPY ./src/smartdns /usr/sbin
-          COPY ./openssl/libcrypto.so ./openssl/libssl.so ./plugin/smartdns-ui/libsmartdns_ui.so ./plugin/smartdns-ui/libgcc_s.so.1 ./plugin/smartdns-ui/libstdc++.so.6 ./jemalloc-5.3.0/lib/libjemalloc.so.2 /usr/lib
+          COPY ./openssl/libcrypto.so ./openssl/libssl.so ./plugin/smartdns-ui/libsmartdns_ui.so ./plugin/smartdns-ui/libgcc_s.so.1 ./plugin/smartdns-ui/libstdc++.so.6 ./jemalloc/lib/libjemalloc.so.2 /usr/lib
           COPY ./smartdns-webui/out /wwwroot
           RUN apk add --no-cache tzdata && (ldd /usr/sbin/smartdns 2>&1 | grep -q "libatomic.so" && apk add --no-cache libatomic || true)
           RUN ln -sf /usr/lib/libssl.so /usr/lib/libssl.so.3 && ln -sf /usr/lib/libcrypto.so /usr/lib/libcrypto.so.3
