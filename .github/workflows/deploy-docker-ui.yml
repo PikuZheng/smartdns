@@ -73,11 +73,13 @@ jobs:
           fi
           make clean && make all
           cd /workdir/jemalloc
+          ./autogen.sh && make distclean
           if [ "$GOARCH" == "armv7" ] ;then
-            ./configure --host=armv7l-linux-musleabihf && make
+            ./configure --host=armv7l-linux-musleabihf --disable-initial-exec-tls
           else
-            ./configure --host=$GOARCH-linux-musl && make
+            ./configure --host=$GOARCH-linux-musl
           fi
+          make
           cd /workdir
           export CFLAGS="-I /workdir/openssl/include"
           export LDFLAGS="-L /workdir/openssl -L /workdir/jemalloc/lib -ljemalloc"
