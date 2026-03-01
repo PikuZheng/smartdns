@@ -424,15 +424,8 @@ impl DB {
             "PRAGMA incremental_vacuum".to_string()
         };
 
-        let mut stmt = conn.prepare(vacuum_sql.as_str())?;
-        let mut _reclaimed_pages = 0;
-
-        let rows = stmt.query_map([], |_row| Ok(()));
-        if let Ok(rows) = rows {
-            for _row in rows {
-                _reclaimed_pages += 1;
-            }
-        }
+        conn.query_row(&vacuum_sql, [], |_| Ok(()))?;
+        conn.execute("PRAGMA shrink_memory", [])?;
         Ok(())
     }
 
