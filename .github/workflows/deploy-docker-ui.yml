@@ -121,7 +121,7 @@ jobs:
             cp /usr/local/musl/$GOARCH-unknown-linux-musl/lib/libgcc_s.so.1 ./
             cp /usr/local/musl/$GOARCH-unknown-linux-musl/lib/libstdc++.so.6 ./
           fi
-          musl-strip libsmartdns_ui.so && musl-strip ../../src/smartdns && musl-strip ../../openssl/libcrypto.so.3 && musl-strip ../../openssl/libssl.so.3 && musl-strip libgcc_s.so.1  && musl-strip ../../jemalloc/lib/libjemalloc.so.2  || true
+          musl-strip libsmartdns_ui.so && musl-strip ../../src/smartdns && musl-strip ../../openssl/libcrypto.so.3 && musl-strip ../../openssl/libssl.so.3 && musl-strip libgcc_s.so.1 && musl-strip libstdc++.so.6 && musl-strip ../../jemalloc/lib/libjemalloc.so.2  || true
           EOF
           if  test "$GOARCH" = "armv7" ;then
             docker run -i --rm -v ${{ github.workspace }}:/workdir messense/rust-musl-cross:armv7-musleabihf sh /workdir/docker-build.sh
