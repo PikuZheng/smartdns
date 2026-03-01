@@ -996,62 +996,49 @@ impl DB {
     }
 
     pub fn refresh_client_top_list(&self, timestamp: u64) -> Result<(), Box<dyn Error>> {
-        let mut client_count_list = Vec::new();
-        let conn = match self.get_readonly_conn() {
-            Some(v) => v,
-            None => return Err("db is not open".into()),
-        };
-
         let timestamp_now = smartdns::get_utc_time_ms();
-        let sql = "SELECT client, COUNT(*) FROM domain WHERE timestamp >= ? GROUP BY client ORDER BY COUNT(*) DESC LIMIT 20";
-        self.debug_query_plan(&conn, sql.to_string(), &vec![timestamp.to_string()]);
-        let mut stmt = conn.prepare(sql)?;
-        let rows = stmt.query_map([timestamp.to_string()], |row| {
-            Ok(ClientQueryCount {
-                client_ip: row.get(0)?,
-                count: row.get(1)?,
-                timestamp_start: timestamp,
-                timestamp_end: timestamp_now,
-            })
-        });
-
-        if let Ok(rows) = rows {
-            for row in rows {
-                if let Ok(row) = row {
-                    client_count_list.push(row);
-                }
-            }
-        }
-
         let mut conn = self.conn.lock().unwrap();
         if conn.as_ref().is_none() {
             return Err("db is not open".into());
         }
 
         let conn = conn.as_mut().unwrap();
+        let sql = "SELECT client, count FROM top_client_list ORDER BY count DESC";
+        self.debug_query_plan(&conn, sql.to_string(), &vec![]);
 
         let tx = conn.transaction()?;
-        let mut stmt = tx.prepare("DELETE FROM top_client_list")?;
-        stmt.execute([])?;
-        stmt.finalize()?;
-        let mut stmt =
-            tx.prepare("INSERT INTO top_client_list (client, count, timestamp_start, timestamp_end) VALUES ( ?1, ?2, $3, $4)")?;
-        for client in &client_count_list {
-            stmt.execute(rusqlite::params![
-                client.client_ip,
-                client.count,
-                client.timestamp_start,
-                client.timestamp_end
-            ])?;
-            dns_log!(
-                LogLevel::DEBUG,
-                "client: {}, count: {}, timestamp_start: {}, timestamp_end: {}",
-                client.client_ip,
-                client.count,
-                client.timestamp_start,
-                client.timestamp_end
-            );
+        tx.execute("DELETE FROM top_client_list", [])?;
+        tx.execute(
+            "INSERT INTO top_client_list (client, count, timestamp_start, timestamp_end)
+             SELECT 
+                 client,
+                 COUNT(*),
+                 ?1,
+                 ?2
+             FROM domain
+             WHERE timestamp >= ?1
+             GROUP BY client
+             ORDER BY COUNT(*) DESC
+             LIMIT 20",
+            rusqlite::params![timestamp, timestamp_now],
+        )?;
+
+        let mut client_count_list = Vec::new();
+
+        let mut stmt = tx.prepare(sql)?;
+        let rows = stmt.query_map([], |row| {
+            Ok(ClientQueryCount {
+                client_ip: row.get(0)?,
+                count: row.get(1)?,
+                timestamp_start: timestamp,
+                timestamp_end: timestamp_now,
+            })
+        })?;
+
+        for row in rows {
+            client_count_list.push(row?);
         }
+
         stmt.finalize()?;
         tx.commit()?;
 
@@ -1230,52 +1217,47 @@ impl DB {
     }
 
     pub fn refresh_domain_top_list(&self, timestamp: u64) -> Result<(), Box<dyn Error>> {
-        let mut domain_count_list = Vec::new();
-        let conn = match self.get_readonly_conn() {
-            Some(v) => v,
-            None => return Err("db is not open".into()),
-        };
-
         let timestamp_now = smartdns::get_utc_time_ms();
-        let sql = "SELECT domain, COUNT(*) FROM domain WHERE timestamp >= ? GROUP BY domain ORDER BY COUNT(*) DESC LIMIT 20";
-        self.debug_query_plan(&conn, sql.to_string(), &vec![timestamp.to_string()]);
-        let mut stmt = conn.prepare(sql)?;
-        let rows = stmt.query_map([timestamp.to_string()], |row| {
-            Ok(DomainQueryCount {
-                domain: row.get(0)?,
-                count: row.get(1)?,
-                timestamp_start: timestamp,
-                timestamp_end: timestamp_now,
-            })
-        });
-
-        if let Ok(rows) = rows {
-            for row in rows {
-                if let Ok(row) = row {
-                    domain_count_list.push(row);
-                }
-            }
-        }
-
         let mut conn = self.conn.lock().unwrap();
         if conn.as_ref().is_none() {
             return Err("db is not open".into());
         }
 
         let conn = conn.as_mut().unwrap();
+        let sql = "SELECT domain, count FROM top_domain_list ORDER BY count DESC";
+        self.debug_query_plan(&conn, sql.to_string(), &vec![]);
+
         let tx = conn.transaction()?;
-        let mut stmt = tx.prepare("DELETE FROM top_domain_list")?;
-        stmt.execute([])?;
-        stmt.finalize()?;
-        let mut stmt =
-            tx.prepare("INSERT INTO top_domain_list (domain, count, timestamp_start, timestamp_end) VALUES ( ?1, ?2, ?3, ?4)")?;
-        for domain in &domain_count_list {
-            stmt.execute(rusqlite::params![
-                domain.domain,
-                domain.count,
-                domain.timestamp_start,
-                domain.timestamp_end
-            ])?;
+        tx.execute("DELETE FROM top_domain_list", [])?;
+        tx.execute(
+            "INSERT INTO top_domain_list (domain, count, timestamp_start, timestamp_end)
+               SELECT 
+               domain,
+               COUNT(*),
+               ?1,
+               ?2
+             FROM domain
+             WHERE timestamp >= ?1
+             GROUP BY domain
+             ORDER BY COUNT(*) DESC
+             LIMIT 20",
+            rusqlite::params![timestamp, timestamp_now],
+        )?;
+
+        let mut domain_count_list = Vec::new();
+
+        let mut stmt = tx.prepare(sql)?;
+        let rows = stmt.query_map([], |row| {
+            Ok(DomainQueryCount {
+                domain: row.get(0)?,
+                count: row.get(1)?,
+                timestamp_start: timestamp,
+                timestamp_end: timestamp_now,
+            })
+        })?;
+
+        for row in rows {
+            domain_count_list.push(row?);
         }
         stmt.finalize()?;
         tx.commit()?;
