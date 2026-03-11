@@ -135,7 +135,7 @@ jobs:
           COPY ./src/smartdns /usr/sbin
           COPY ./openssl/libcrypto.so ./openssl/libssl.so ./plugin/smartdns-ui/libsmartdns_ui.so ./plugin/smartdns-ui/libgcc_s.so.1 ./plugin/smartdns-ui/libstdc++.so.6 ./jemalloc/lib/libjemalloc.so.2 /usr/lib
           COPY ./smartdns-webui/out /wwwroot
-          RUN apk add --no-cache tzdata && (ldd /usr/sbin/smartdns 2>&1 | grep -q "libatomic.so" && apk add --no-cache libatomic || true)
+          RUN apk add --no-cache tzdata ca-certificates && (ldd /usr/sbin/smartdns 2>&1 | grep -q "libatomic.so" && apk add --no-cache libatomic || true)
           RUN ln -sf /usr/lib/libssl.so /usr/lib/libssl.so.3 && ln -sf /usr/lib/libcrypto.so /usr/lib/libcrypto.so.3
           RUN ln -sf /usr/lib/libsmartdns_ui.so /usr/lib/smartdns_ui.so
           EXPOSE 53/udp 53/tcp 6080/tcp
@@ -206,7 +206,7 @@ jobs:
           sed -i "s/Architecture:.*/Architecture: all/" ./DEBIAN/control
           sed -i '/^Depends:/ {s/$/, musl/;b}; /^Package:/a Depends: musl' ./DEBIAN/control
           chmod 0755 ./DEBIAN/prerm || true
-          dpkg -b ${{ github.workspace }}/package/debian ${{ github.workspace }}/build/smartdns_with_ui.${{needs.get-version.outputs.CUR_VERSION}}.$GOARCH.deb
+          dpkg -Zgzip -b ${{ github.workspace }}/package/debian ${{ github.workspace }}/build/smartdns_with_ui.${{needs.get-version.outputs.CUR_VERSION}}.$GOARCH.deb
       - name: release ipk with edns
         run: |
           cd ${{ github.workspace }}
@@ -232,7 +232,7 @@ jobs:
           rm usr/sbin/smartdns || true
           cp ${{ github.workspace }}/src/smartdns usr/sbin/
           chmod +x usr/sbin/smartdns || true
-          dpkg -b ${{ github.workspace }}/package/debian ${{ github.workspace }}/build/smartdns_with_ui.${{needs.get-version.outputs.CUR_VERSION}}.$GOARCH-edns.deb
+          dpkg -Zgzip -b ${{ github.workspace }}/package/debian ${{ github.workspace }}/build/smartdns_with_ui.${{needs.get-version.outputs.CUR_VERSION}}.$GOARCH-edns.deb
       - name: general tag and release ipk
         id: tag
         run: |
