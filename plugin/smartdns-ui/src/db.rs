@@ -1475,43 +1475,31 @@ impl DB {
         param: Option<&ClientListGetParam>,
     ) -> Result<(String, String, Vec<String>), Box<dyn Error>> {
         let mut is_desc_order = true;
-        let mut is_cursor_prev = false;
         let param = match param {
             Some(v) => v,
             None => return Ok((String::new(), String::new(), Vec::new())),
         };
         let mut order_timestamp_first = false;
-        let mut cusor_with_timestamp = false;
 
-        let mut sql_where = Vec::new();
+        let mut sql_where: Vec<String> = Vec::new();
         let mut sql_param: Vec<String> = Vec::new();
         let mut sql_order = String::new();
 
         if let Some(v) = &param.id {
             sql_where.push("id = ?".to_string());
             sql_param.push(v.to_string());
-            order_timestamp_first = false;
         }
 
         if let Some(v) = &param.order {
             if v.eq_ignore_ascii_case("asc") {
-                is_cursor_prev = true;
+                is_desc_order = false;
             } else if v.eq_ignore_ascii_case("desc") {
-                is_cursor_prev = false;
+                is_desc_order = true;
             } else {
                 return Err("order param error".into());
             }
         }
 
-        if let Some(v) = &param.cursor {
-            if v.direction.eq_ignore_ascii_case("prev") {
-                is_desc_order = !is_desc_order;
-            } else if v.direction.eq_ignore_ascii_case("next") {
-                // do nothing
-            } else {
-                return Err("cursor direction param error".into());
-            }
-        }
 
         if let Some(v) = &param.client_ip {
             sql_where.push("client_ip = ?".to_string());
@@ -1529,84 +1517,30 @@ impl DB {
         }
 
         if let Some(v) = &param.timestamp_before {
-            let mut use_cursor = false;
-            if param.cursor.is_some() && (is_desc_order || is_cursor_prev) {
-                let v = param.cursor.as_ref().unwrap().id;
-                if let Some(v) = v {
-                    sql_where.push("id < ?".to_string());
-                    sql_param.push(v.to_string());
-                    use_cursor = true;
-                    order_timestamp_first = false;
-                    cusor_with_timestamp = true;
-                }
-            }
-
-            if use_cursor == false {
-                sql_where.push("last_query_timestamp <= ?".to_string());
-                sql_param.push(v.to_string());
-            }
+            sql_where.push("last_query_timestamp <= ?".to_string());
+            sql_param.push(v.to_string());
+            order_timestamp_first = true;
         }
 
         if let Some(v) = &param.timestamp_after {
-            let mut use_cursor = false;
-            if param.cursor.is_some() && (!is_desc_order || is_cursor_prev) {
-                let v = param.cursor.as_ref().unwrap().id;
-                if let Some(v) = v {
-                    sql_where.push("id > ?".to_string());
-                    sql_param.push(v.to_string());
-                    use_cursor = true;
-                    order_timestamp_first = false;
-                    cusor_with_timestamp = true;
-                }
-            }
-
-            if use_cursor == false {
-                sql_where.push("last_query_timestamp >= ?".to_string());
-                sql_param.push(v.to_string());
-            }
+            sql_where.push("last_query_timestamp >= ?".to_string());
+            sql_param.push(v.to_string());
+            order_timestamp_first = true;
         }
 
-        if !cusor_with_timestamp {
-            if let Some(v) = &param.cursor {
-                if is_cursor_prev {
-                    if let Some(id) = &v.id {
-                        if is_desc_order {
-                            sql_where.push("id > ?".to_string());
-                        } else {
-                            sql_where.push("id < ?".to_string());
-                        }
-
-                        sql_param.push(id.to_string());
-                        order_timestamp_first = false;
-                    }
-                } else {
-                    if let Some(id) = &v.id {
-                        if is_desc_order {
-                            sql_where.push("id < ?".to_string());
-                        } else {
-                            sql_where.push("id > ?".to_string());
-                        }
-
-                        sql_param.push(id.to_string());
-                        order_timestamp_first = false;
-                    }
-                }
-            }
-        }
-
-        if is_desc_order {
-            if order_timestamp_first {
+        if order_timestamp_first {
+            if is_desc_order {
                 sql_order.push_str(" ORDER BY last_query_timestamp DESC, id DESC");
             } else {
-                sql_order.push_str(" ORDER BY id DESC, last_query_timestamp DESC");
+                sql_order.push_str(" ORDER BY last_query_timestamp ASC, id ASC");
             }
         } else {
-            if order_timestamp_first {
-                sql_order.push_str(" ORDER BY last_query_timestamp ASC, id ASC");
+            if is_desc_order {
+                sql_order.push_str(" ORDER BY id DESC, last_query_timestamp DESC");
             } else {
                 sql_order.push_str(" ORDER BY id ASC, last_query_timestamp ASC");
             }
-        }
+        };
 
         let sql_where = if sql_where.is_empty() {
             String::new()
@@ -1622,7 +1556,6 @@ impl DB {
         param: Option<&ClientListGetParam>,
     ) -> Result<QueryClientListResult, Box<dyn Error>> {
         let query_start = std::time::Instant::now();
-        let mut cursor_reverse = false;
 
         let mut ret = QueryClientListResult {
             client_list: vec![],
@@ -1637,33 +1570,48 @@ impl DB {
 
         let conn = conn.as_ref().unwrap();
 
-        let (sql_where, sql_order, mut sql_param) = Self::get_client_sql_where(param)?;
+        let (mut sql_where, sql_order, mut sql_param) = Self::get_client_sql_where(param)?;
 
         let mut sql = String::new();
         sql.push_str("SELECT id, client_ip, mac, hostname, last_query_timestamp FROM client");
 
-        sql.push_str(sql_where.as_str());
-        sql.push_str(sql_order.as_str());
-
         if let Some(p) = param {
-            let mut with_offset = true;
-            if let Some(cursor) = &p.cursor {
-                if cursor.id.is_some() {
-                    sql.push_str(" LIMIT ?");
-                    sql_param.push(p.page_size.to_string());
-                    with_offset = false;
-                }
+            if p.page_num > 1 {
 
-                if cursor.direction.eq_ignore_ascii_case("prev") {
-                    cursor_reverse = true;
+                let offset = (p.page_num - 1) * p.page_size;
+
+                let mut anchor_sql = sql.clone();
+                anchor_sql.push_str(&sql_where);
+                anchor_sql.push_str(&sql_order);
+                anchor_sql.push_str(" LIMIT 1 OFFSET ?");
+
+                let mut anchor_param = sql_param.clone();
+                anchor_param.push(offset.to_string());
+
+                self.debug_query_plan(&conn, anchor_sql.clone(), &anchor_param);
+
+                let mut stmt = conn.prepare(&anchor_sql)?;
+                let mut rows = stmt.query(rusqlite::params_from_iter(anchor_param))?;
+
+                if let Some(row) = rows.next()? {
+
+                    let anchor_id: i64 = row.get(0)?;
+
+                    if sql_where.is_empty() {
+                        sql_where = " WHERE id <= ?".to_string();
+                    } else {
+                        sql_where.push_str(" AND id <= ?");
+                    }
+
+                    sql_param.push(anchor_id.to_string());
                 }
             }
 
-            if with_offset {
-                sql.push_str(" LIMIT ? OFFSET ?");
-                sql_param.push(p.page_size.to_string());
-                sql_param.push(((p.page_num - 1) * p.page_size).to_string());
-            }
+            sql.push_str(&sql_where);
+            sql.push_str(&sql_order);
+            sql.push_str(" LIMIT ?");
+
+            sql_param.push(p.page_size.to_string());
         }
 
         self.debug_query_plan(conn, sql.clone(), &sql_param);
@@ -1696,18 +1644,8 @@ impl DB {
             }
         }
 
-        if cursor_reverse {
-            ret.client_list.reverse();
-        }
-
-        if let Some(p) = param {
-            if let Some(v) = &p.cursor {
-                ret.total_count = v.total_count;
-                ret.step_by_cursor = true;
-            } else {
-                let total_count = self.get_client_list_count(param);
-                ret.total_count = total_count;
-            }
+        if let Some(_p) = param {
+            ret.total_count = self.get_client_list_count(param);
         }
 
         dns_log!(
