@@ -486,7 +486,8 @@ int _dns_server_process_answer(struct dns_request *request, const char *domain, 
 
 	/* return NOERROR if all ips are skipped */
 	if (request->rcode == DNS_RC_SERVFAIL && has_result == 1 && is_skip == 1) {
-		request->rcode = DNS_RC_NOERROR;
+		/*request->rcode = DNS_RC_NOERROR;*/
+		return DNS_CLIENT_ACTION_RETRY;
 	}
 
 	if (has_result == 0 && request->rcode == DNS_RC_NOERROR && packet->head.tc == 1 && request->has_ip == 0 &&
