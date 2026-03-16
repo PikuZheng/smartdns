@@ -1576,45 +1576,62 @@ impl DB {
         sql.push_str("SELECT id, client_ip, mac, hostname, last_query_timestamp FROM client");
 
         if let Some(p) = param {
-            if p.page_num > 1 {
+            let page_size = p.page_size as u64;
+            let page_num = p.page_num as u64;
+            let offset = (page_num - 1) * page_size;
 
-                let offset = (p.page_num - 1) * p.page_size;
+            let use_timestamp_sort =
+                p.timestamp_before.is_some() || p.timestamp_after.is_some();
 
-                let mut anchor_sql = sql.clone();
-                anchor_sql.push_str(&sql_where);
-                anchor_sql.push_str(&sql_order);
-                anchor_sql.push_str(" LIMIT 1 OFFSET ?");
+            if use_timestamp_sort {
+                sql.push_str(&sql_where);
+                sql.push_str(&sql_order);
+                sql.push_str(" LIMIT ? OFFSET ?");
+                sql_param.push(page_size.to_string());
+                sql_param.push(offset.to_string());
+            } else {
+                if page_num > 1 {
 
-                let mut anchor_param = sql_param.clone();
-                anchor_param.push(offset.to_string());
+                    let mut anchor_sql = sql.clone();
+                    anchor_sql.push_str(&sql_where);
+                    anchor_sql.push_str(&sql_order);
+                    anchor_sql.push_str(" LIMIT 1 OFFSET ?");
 
-                self.debug_query_plan(&conn, anchor_sql.clone(), &anchor_param);
+                    let mut anchor_param = sql_param.clone();
+                    anchor_param.push(offset.to_string());
 
-                let mut stmt = conn.prepare(&anchor_sql)?;
-                let mut rows = stmt.query(rusqlite::params_from_iter(anchor_param))?;
+                    self.debug_query_plan(&conn, anchor_sql.clone(), &anchor_param);
+                    let mut stmt = conn.prepare(&anchor_sql)?;
+                    let mut rows = stmt.query(rusqlite::params_from_iter(anchor_param))?;
+                    if let Some(row) = rows.next()? {
+                        let anchor_id: i64 = row.get(0)?;
+                        let is_desc = match &p.order {
+                            Some(o) => !o.eq_ignore_ascii_case("asc"),
+                            None => true,
+                        };
 
-                if let Some(row) = rows.next()? {
+                        let cond = if is_desc { "id <= ?" } else { "id >= ?" };
 
-                    let anchor_id: i64 = row.get(0)?;
+                        if sql_where.is_empty() {
+                            sql_where = format!(" WHERE {}", cond);
+                        } else {
+                            sql_where.push_str(" AND ");
+                            sql_where.push_str(cond);
+                        }
 
-                    if sql_where.is_empty() {
-                        sql_where = " WHERE id <= ?".to_string();
-                    } else {
-                        sql_where.push_str(" AND id <= ?");
+                        sql_param.push(anchor_id.to_string());
                     }
-
-                    sql_param.push(anchor_id.to_string());
                 }
+
+                sql.push_str(&sql_where);
+                sql.push_str(&sql_order);  //push ORDER after WHERE !important
+                sql.push_str(" LIMIT ?");  //push LIMIT after ORDER !important
+
+                sql_param.push(page_size.to_string());
             }
-
-            sql.push_str(&sql_where);
-            sql.push_str(&sql_order);
-            sql.push_str(" LIMIT ?");
-
-            sql_param.push(p.page_size.to_string());
         }
 
-        self.debug_query_plan(conn, sql.clone(), &sql_param);
+        self.debug_query_plan(&conn, sql.clone(), &sql_param);
         let stmt = conn.prepare(&sql);
         if let Err(e) = stmt {
             dns_log!(LogLevel::ERROR, "get_client_list error: {}", e);
@@ -1650,7 +1667,7 @@ impl DB {
 
         dns_log!(
             LogLevel::DEBUG,
-            "domain_list time: {}ms",
+            "client_list time: {}ms",
             query_start.elapsed().as_millis()
         );
         Ok(ret)
