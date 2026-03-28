@@ -132,6 +132,7 @@ jobs:
           cat >> Dockerfile.unknown << 'EOF'
           FROM alpine:3.23
           ENV TZ="Asia/Shanghai"
+          ENV MALLOC_CONF="dirty_decay_ms:1000,muzzy_decay_ms:1000,background_thread:true"
           COPY ./src/smartdns /usr/sbin
           COPY ./openssl/libcrypto.so ./openssl/libssl.so ./plugin/smartdns-ui/libsmartdns_ui.so ./plugin/smartdns-ui/libgcc_s.so.1 ./plugin/smartdns-ui/libstdc++.so.6 ./jemalloc/lib/libjemalloc.so.2 /usr/lib
           COPY ./smartdns-webui/out /wwwroot
