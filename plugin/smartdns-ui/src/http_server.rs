@@ -822,6 +822,12 @@ impl HttpServer {
         let mut acceptor = None;
         let mut https_listener = None;
         if https_port > 0 {
+            if !Plugin::smartdns_has_tls_or_https_bind() {
+                return Err(
+                    "https-port requires smartdns TLS/HTTPS bind enabled (DNS_BIND_TYPE_TLS or DNS_BIND_TYPE_HTTPS).".into(),
+                );
+            }
+
             let cert_info = Plugin::smartdns_get_cert()?;
 
             dns_log!(
