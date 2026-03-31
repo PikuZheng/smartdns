@@ -83,6 +83,7 @@ impl SmartdnsPlugin {
         opts.optopt("r", "www-root", "http www root", "PATH");
         opts.optopt("", "data-dir", "http data dir", "PATH");
         opts.optopt("", "token-expire", "http token expire time", "TIME");
+        opts.optopt("", "https-port", "https server listen port", "PORT");
         if args.len() <= 0 {
             return Ok(());
         }
@@ -132,6 +133,19 @@ impl SmartdnsPlugin {
             http_conf.token_expired_time = v.unwrap();
         }
 
+        let mut https_port = Plugin::dns_conf_plugin_config("smartdns-ui.https-port");
+        if https_port.is_none() {
+            https_port = matches.opt_str("https-port");
+        }
+        if let Some(https_port) = https_port {
+            let v = https_port.parse::<u16>();
+            if let Err(e) = v {
+                dns_log!(LogLevel::ERROR, "parse https port error: {}", e.to_string());
+                return Err(Box::new(e));
+            }
+            http_conf.https_port = v.unwrap();
+        }
+
         if let Some(data_dir) = matches.opt_str("data-dir") {
             data_conf.data_path = data_dir;
         }
@@ -175,7 +189,7 @@ impl SmartdnsPlugin {
             return;
         }
         *is_start = false;
-        
+
         dns_log!(LogLevel::INFO, "stop smartdns-ui server.");
         self.http_server_ctl.stop_http_server();
         self.data_server_ctl.stop_data_server();
