@@ -265,26 +265,6 @@ pub fn smartdns_ui_version() -> String {
     ver
 }
 
-pub fn dns_conf_has_tls_or_https_bind() -> bool {
-    unsafe {
-        let bind_num = smartdns_c::dns_conf.bind_ip_num;
-        if bind_num <= 0 {
-            return false;
-        }
-
-        for i in 0..bind_num as usize {
-            let bind_type = smartdns_c::dns_conf.bind_ip[i].type_;
-            if bind_type == smartdns_c::DNS_BIND_TYPE_DNS_BIND_TYPE_TLS
-                || bind_type == smartdns_c::DNS_BIND_TYPE_DNS_BIND_TYPE_HTTPS
-            {
-                return true;
-            }
-        }
-    }
-
-    false
-}
-
 pub fn smartdns_get_server_name() -> String {
     unsafe {
         let mut buffer = [0u8; 4096];
@@ -890,10 +870,6 @@ impl Plugin {
                 password: "".to_string(),
             })
         }
-    }
-
-    pub fn smartdns_has_tls_or_https_bind() -> bool {
-        dns_conf_has_tls_or_https_bind()
     }
 
     pub fn dns_cache_flush() {
