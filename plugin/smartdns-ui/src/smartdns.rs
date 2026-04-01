@@ -30,6 +30,8 @@ use std::error::Error;
 use std::ffi::CString;
 use std::fmt;
 use std::os::raw::*;
+use std::ffi::CStr;
+use serde::Serialize;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -359,6 +361,7 @@ extern "C" fn dns_server_log(
     msg: *const c_char,
     msg_len: i32,
 ) {
+    if msg.is_null() || msg_len <= 0 { return; }
     unsafe {
         let plugin_addr = std::ptr::addr_of_mut!(PLUGIN);
         let ops = (*plugin_addr).ops.as_ref();
@@ -366,10 +369,8 @@ extern "C" fn dns_server_log(
             return;
         }
 
-        let raw_msg = std::slice::from_raw_parts(msg as *const u8, msg_len as usize + 1);
-        let msg = std::ffi::CStr::from_bytes_with_nul_unchecked(raw_msg)
-            .to_string_lossy()
-            .into_owned();
+        let raw_msg = std::slice::from_raw_parts(msg as *const u8, msg_len as usize);
+        let msg = String::from_utf8_lossy(raw_msg).into_owned();
         let level = LogLevel::try_from(level as u32).unwrap();
 
         let ops = ops.unwrap();
@@ -379,6 +380,7 @@ extern "C" fn dns_server_log(
 
 #[no_mangle]
 extern "C" fn dns_server_audit_log(msg: *const c_char, msg_len: i32) {
+    if msg.is_null() || msg_len <= 0 { return; }
     unsafe {
         let plugin_addr = std::ptr::addr_of_mut!(PLUGIN);
         let ops = (*plugin_addr).ops.as_ref();
@@ -386,10 +388,8 @@ extern "C" fn dns_server_audit_log(msg: *const c_char, msg_len: i32) {
             return;
         }
 
-        let raw_msg = std::slice::from_raw_parts(msg as *const u8, msg_len as usize + 1);
-        let msg = std::ffi::CStr::from_bytes_with_nul_unchecked(raw_msg)
-            .to_string_lossy()
-            .into_owned();
+        let raw_msg = std::slice::from_raw_parts(msg as *const u8, msg_len as usize);
+        let msg = String::from_utf8_lossy(raw_msg).into_owned();
 
         let ops = ops.unwrap();
         ops.server_audit_log(msg.as_str(), msg_len as i32);
@@ -422,7 +422,9 @@ extern "C" fn dns_plugin_exit(_plugin: *mut smartdns_c::dns_plugin) -> i32 {
     unsafe {
         let plugin_addr = std::ptr::addr_of_mut!(PLUGIN);
         smartdns_c::smartdns_operations_unregister(&SMARTDNS_OPS);
-        (*plugin_addr).ops.as_mut().unwrap().server_exit();
+        if let Some(mut ops) = (*plugin_addr).ops.take() {
+            ops.server_exit();
+        }
     }
     return 0;
 }
@@ -953,6 +955,29 @@ impl Plugin {
         self.args = args;
         Ok(())
     }
+}
+
+#[derive(Serialize)]
+pub struct CachedDomainInfo { pub id: u64, pub domain: String, pub qtype: u16, pub cached_time: i64, pub ttl_remaining: i32 }
+
+extern "C" fn cache_foreach_cb(domain: *const c_char, qtype: u16, ttl_remaining: i32, insert_time: i64, userdata: *mut c_void) {
+    let domains = unsafe { &mut *(userdata as *mut Vec<CachedDomainInfo>) };
+    let domain_str = unsafe { CStr::from_ptr(domain).to_string_lossy().into_owned() };
+    domains.push(CachedDomainInfo { id: 0, domain: domain_str, qtype, cached_time: insert_time, ttl_remaining });
+}
+
+pub fn get_cached_domains() -> Vec<CachedDomainInfo> {
+    let mut domains: Vec<CachedDomainInfo> = Vec::new();
+    unsafe {
+        let count = smartdns_c::dns_cache_foreach(Some(cache_foreach_cb), &mut domains as *mut _ as *mut c_void);
+        if count < 0 {
+            return Vec::new();
+        }
+        for (idx, item) in domains.iter_mut().enumerate() {
+            item.id = (idx + 1) as u64;
+        }
+    }
+    domains
 }
 
 pub struct Stats {}

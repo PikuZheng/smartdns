@@ -1470,7 +1470,6 @@ static int _tlog_wait_pids(void)
 
 static int _tlog_close(struct tlog_log *log, int wait_hang)
 {
-    int removed = 0;
     struct tlog_log *next = tlog.log;
 
     if (log == NULL) {
@@ -1498,23 +1497,23 @@ static int _tlog_close(struct tlog_log *log, int wait_hang)
 
     if (next == log) {
         tlog.log = next->next;
-        removed = 1;
-    } else {
-        while (next) {
-            if (next->next == log) {
-                next->next = log->next;
-                removed = 1;
-                break;
-            }
-            next = next->next;
+        free(log);
+        return 0;
+    }
+
+    while (next) {
+        if (next->next == log) {
+            next->next = log->next;
+            free(log);
+            return -1;
         }
+        next = next->next;
     }
 
     pthread_cond_destroy(&log->client_cond);
     pthread_mutex_destroy(&log->lock);
-    free(log);
 
-    return removed ? 0 : -1;
+    return 0;
 }
 
 static struct tlog_log *_tlog_next_log(struct tlog_log *last_log)
