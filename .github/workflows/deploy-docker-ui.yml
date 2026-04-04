@@ -162,7 +162,8 @@ jobs:
       - name: rebuild-smartdns-without-jemalloc
         run: |
           cd ${{ github.workspace }}
-          mkdir -p ${{ github.workspace }}/build
+          rm ${{ github.workspace }}/build/* || true
+          mkdir -p ${{ github.workspace }}/build || true
           rm docker-openssl.sh || true
           cat >> docker-openssl.sh << EOF
           apk add perl make coreutils tar pkgconfig dpkg binutils
@@ -176,7 +177,6 @@ jobs:
           else
             docker run -i --rm -v ${{ github.workspace }}:/workdir muslcc/x86_64:$GOARCH-linux-musl sh /workdir/docker-openssl.sh
           fi
-          rm ${{ github.workspace }}/build/*
       - name: release ipk
         run: |
           cd ${{ github.workspace }}/package/openwrt
