@@ -302,7 +302,10 @@ static int _dns_plugin_unload_library(struct dns_plugin *plugin)
 	}
 
 	if (plugin->handle) {
-		dlclose(plugin->handle);
+		//dlclose(plugin->handle);
+		/* Do not dlclose plugin library. Current plugin lifecycle does not
+		 * support hot reload, and skipping dlclose avoids teardown races with
+		 * plugin-owned background threads. */
 		plugin->handle = NULL;
 	}
 
