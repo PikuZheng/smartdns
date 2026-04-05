@@ -16,8 +16,6 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-extern crate cfg_if;
-
 use crate::data_server::*;
 use crate::dns_log;
 use crate::http_api_msg::*;
@@ -38,6 +36,7 @@ use hyper_util::server::conn::auto;
 use std::convert::Infallible;
 use std::error::Error;
 use std::fs::Metadata;
+use std::io::BufReader;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::path::{Component, Path};
@@ -51,13 +50,7 @@ use tokio::net::TcpListener;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
-cfg_if::cfg_if! {
-    if #[cfg(feature = "https")] {
-        use rustls_pemfile;
-        use std::io::BufReader;
-        use tokio_rustls::{rustls, TlsAcceptor};
-    }
-}
+use tokio_rustls::{rustls, TlsAcceptor};
 
 const HTTP_SERVER_DEFAULT_PASSWORD: &str = "password";
 const HTTP_SERVER_DEFAULT_USERNAME: &str = "admin";
@@ -74,6 +67,7 @@ pub struct HttpServerConfig {
     pub token_expired_time: u32,
     pub enable_cors: bool,
     pub enable_terminal: bool,
+    pub https_port: u16,
 }
 
 impl HttpServerConfig {
@@ -92,6 +86,7 @@ impl HttpServerConfig {
             token_expired_time: 600,
             enable_cors: false,
             enable_terminal: false,
+            https_port: 0,
         }
     }
 
@@ -108,6 +103,7 @@ impl HttpServerConfig {
             "enable_terminal".to_string(),
             self.enable_terminal.to_string(),
         );
+        map.insert("https_port".to_string(), self.https_port.to_string());
         map
     }
 
@@ -144,6 +140,10 @@ impl HttpServerConfig {
             } else {
                 self.enable_terminal = false;
             }
+        }
+
+        if let Some(https_port) = data_server.get_server_config("smartdns-ui.https-port") {
+            self.https_port = https_port.parse::<u16>().unwrap_or(0);
         }
 
         Ok(())
@@ -411,18 +411,7 @@ impl HttpServer {
     }
 
     pub fn is_https_server(&self) -> bool {
-        let http_ip = self.get_conf().http_ip;
-        if http_ip.parse::<url::Url>().is_err() {
-            return false;
-        }
-
-        let binding = http_ip.parse::<url::Url>().unwrap();
-        let scheme = binding.scheme();
-        if scheme == "https" {
-            return true;
-        }
-
-        false
+        self.get_conf().https_port > 0
     }
 
     pub fn get_data_server(&self) -> Arc<DataServer> {
@@ -772,7 +761,6 @@ impl HttpServer {
         });
     }
 
-    #[cfg(feature = "https")]
     async fn https_server_handle_conn(
         this: Arc<HttpServer>,
         stream: tokio_rustls::server::TlsStream<TcpStream>,
@@ -792,7 +780,6 @@ impl HttpServer {
         });
     }
 
-    #[cfg(feature = "https")]
     async fn handle_tls_accept(this: Arc<HttpServer>, acceptor: TlsAcceptor, stream: TcpStream) {
         tokio::task::spawn(async move {
             let acceptor_future = acceptor.accept(stream);
@@ -819,54 +806,56 @@ impl HttpServer {
         kickoff_tx: tokio::sync::oneshot::Sender<i32>,
     ) -> Result<(), Box<dyn Error>> {
         let addr: String;
+        let https_port: u16;
         let mut rx: mpsc::Receiver<()>;
 
         {
             let conf = this.conf.lock().unwrap();
             addr = format!("{}", conf.http_ip);
+            https_port = conf.https_port;
             let mut _rx = this.notify_rx.lock().unwrap();
             rx = _rx.take().unwrap();
         }
 
         let url = addr.parse::<url::Url>()?;
 
-        cfg_if::cfg_if! {
-            if #[cfg(feature = "https")]
-            {
-                let mut acceptor = None;
-                if url.scheme() == "https" {
-                    #[cfg(feature = "https")]
-                    let cert_info = Plugin::smartdns_get_cert()?;
+        let mut acceptor = None;
+        let mut https_listener = None;
+        if https_port > 0 {
+            let cert_info = Plugin::smartdns_get_cert()?;
 
-                    dns_log!(
-                        LogLevel::DEBUG,
-                        "cert: {}, key: {}",
-                        cert_info.cert,
-                        cert_info.key
-                    );
-                    let cert_chain: Result<Vec<rustls::pki_types::CertificateDer<'_>>, _> =
-                        rustls_pemfile::certs(&mut BufReader::new(std::fs::File::open(
-                            cert_info.cert,
-                        )?))
-                        .collect();
-                    let cert_chain = cert_chain.unwrap_or_else(|_| Vec::new());
-                    let key_der = rustls_pemfile::private_key(&mut BufReader::new(
-                        std::fs::File::open(cert_info.key)?,
-                    ))?
-                    .unwrap();
+            dns_log!(
+                LogLevel::DEBUG,
+                "cert: {}, key: {}",
+                cert_info.cert,
+                cert_info.key
+            );
+            let cert_chain: Result<Vec<rustls::pki_types::CertificateDer<'_>>, _> =
+                rustls_pemfile::certs(&mut BufReader::new(std::fs::File::open(cert_info.cert)?))
+                    .collect();
+            let cert_chain = cert_chain.unwrap_or_else(|_| Vec::new());
+            let key_der = rustls_pemfile::private_key(&mut BufReader::new(std::fs::File::open(
+                cert_info.key,
+            )?))?
+            .unwrap();
 
-                    let mut config = rustls::ServerConfig::builder()
-                        .with_no_client_auth()
-                        .with_single_cert(cert_chain, key_der)?;
+            let mut config = rustls::ServerConfig::builder()
+                .with_no_client_auth()
+                .with_single_cert(cert_chain, key_der)?;
 
-                    config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
-                    acceptor = Some(TlsAcceptor::from(Arc::new(config)));
-                }
-            } else {
-                if url.scheme() == "https" {
-                    return Err("https is not supported.".into());
-                }
-            }
+            config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+            acceptor = Some(TlsAcceptor::from(Arc::new(config)));
+
+            let https_sock_addr =
+                format!("{}:{}", url.host_str().unwrap_or("127.0.0.1"), https_port)
+                    .parse::<SocketAddr>()?;
+            let listener = TcpListener::bind(https_sock_addr).await?;
+            dns_log!(
+                LogLevel::INFO,
+                "https server listen at {}",
+                listener.local_addr()?
+            );
+            https_listener = Some(listener);
         }
 
         let host = url.host_str().unwrap_or("127.0.0.1");
@@ -904,23 +893,32 @@ impl HttpServer {
                             if let Err(_) = sock_ref.set_send_buffer_size(262144) {
                                 dns_log!(LogLevel::DEBUG, "Failed to set send buffer size");
                             }
-                            cfg_if::cfg_if! {
-                                if #[cfg(feature = "https")]
-                                {
-                                    if acceptor.is_some() {
-                                        let acceptor = acceptor.clone().unwrap().clone();
-                                        let this_clone = this.clone();
-                                        HttpServer::handle_tls_accept(this_clone, acceptor, stream).await;
-                                    } else {
-                                        HttpServer::http_server_handle_conn(this.clone(), stream).await;
-                                    }
-                                } else  {
-                                    HttpServer::http_server_handle_conn(this.clone(), stream).await;
-                                }
-                            }
+                            HttpServer::http_server_handle_conn(this.clone(), stream).await;
                         }
                         Err(e) => {
                             dns_log!(LogLevel::ERROR, "accept error: {}", e);
+                        }
+                    }
+                }
+                res = async {
+                    if let Some(listener) = https_listener.as_mut() {
+                        Some(listener.accept().await)
+                    } else {
+                        None
+                    }
+                }, if https_listener.is_some() => {
+                    if let Some(res) = res {
+                        match res {
+                            Ok((stream, _)) => {
+                                if let Some(acceptor) = acceptor.as_ref() {
+                                    let acceptor = acceptor.clone();
+                                    let this_clone = this.clone();
+                                    HttpServer::handle_tls_accept(this_clone, acceptor, stream).await;
+                                }
+                            }
+                            Err(e) => {
+                                dns_log!(LogLevel::ERROR, "https accept error: {}", e);
+                            }
                         }
                     }
                 }
