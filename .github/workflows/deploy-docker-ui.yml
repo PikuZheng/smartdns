@@ -68,9 +68,9 @@ jobs:
           elif [ "$GOARCH" == "powerpc64le" ] ;then
             ./Configure no-tests linux-ppc64le
           elif [ "$GOARCH" == "armv7" ] ;then
-            ./Configure no-tests linux-armv4 enable-quic enable-ktls no-docs
+            ./Configure no-tests linux-armv4 enable-quic enable-ktls no-docs no-md4 no-md5 no-ripemd no-blake2 no-srp no-ocsp no-cms no-ts
           else
-            ./Configure no-tests linux-$GOARCH enable-quic enable-ktls no-docs
+            ./Configure no-tests linux-$GOARCH enable-quic enable-ktls no-docs no-md4 no-md5 no-ripemd no-blake2 no-srp no-ocsp no-cms no-ts
           fi
           make clean && make all
           cd /workdir/jemalloc
@@ -82,7 +82,7 @@ jobs:
           fi
           make
           cd /workdir
-          export CFLAGS="-I /workdir/openssl/include"
+          export CFLAGS="-Os -ffunction-sections -fdata-sections -fomit-frame-pointer -fno-unwind-tables -fno-asynchronous-unwind-tables -I/workdir/openssl/include -Wno-error=date-time"
           export LDFLAGS="-L /workdir/openssl -L /workdir/jemalloc/lib -ljemalloc"
           ./package/build-pkg.sh --platform linux --arch all --filearch $GOARCH-linux --outputdir /workdir/build
           EOF
