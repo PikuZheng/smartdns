@@ -68,9 +68,9 @@ jobs:
           elif [ "$GOARCH" == "powerpc64le" ] ;then
             ./Configure no-tests linux-ppc64le
           elif [ "$GOARCH" == "armv7" ] ;then
-            ./Configure no-tests linux-armv4 enable-quic enable-ktls no-docs no-md4 no-md5 no-ripemd no-blake2 no-srp no-ocsp no-cms no-ts
+            ./Configure no-tests linux-armv4 enable-quic enable-ktls no-docs
           else
-            ./Configure no-tests linux-$GOARCH enable-quic enable-ktls no-docs no-md4 no-md5 no-ripemd no-blake2 no-srp no-ocsp no-cms no-ts
+            ./Configure no-tests linux-$GOARCH enable-quic enable-ktls no-docs
           fi
           make clean && make all
           cd /workdir/jemalloc
