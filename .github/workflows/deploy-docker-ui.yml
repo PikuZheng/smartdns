@@ -182,7 +182,7 @@ jobs:
         run: |
           cd ${{ github.workspace }}/package/openwrt
           chmod +x make_openwrt_withui.sh
-          ./make_openwrt_withui.sh -o ${{ github.workspace }}/build --arch all --filearch $GOARCH --ver ${{needs.get-version.outputs.CUR_VERSION}}
+          docker run -i --rm -v ${{ github.workspace }}:/workdir alpine:3 sh -c "apk update && apk add tar && /workdir/package/openwrt/make_openwrt_withui.sh -o /workdir/build --arch all --filearch $GOARCH --ver ${{needs.get-version.outputs.CUR_VERSION}}"
       - name: release deb
         run: |
           cd ${{ github.workspace }}/package/debian
