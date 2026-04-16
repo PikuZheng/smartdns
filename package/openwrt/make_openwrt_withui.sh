@@ -102,7 +102,7 @@ build()
 
 	which apk >/dev/null 2>&1
 	if [ $? -eq 0 ]; then
-		APK_VER="`echo $VER | sed 's/[-]/-r/'`"
+		APK_VER=$(echo $VER | sed -e 's/\.v//' -e 's/\.\([^.]*\)$/-r\1/')
 		ARCH="`echo $ARCH | sed 's/all/noarch/g'`"
 		apk mkpkg \
 			--info "name:smartdns" \
