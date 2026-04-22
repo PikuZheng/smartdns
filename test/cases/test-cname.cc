@@ -193,3 +193,31 @@ server 127.0.0.1:61053
 	EXPECT_EQ(client.GetAnswer()[0].GetName(), "s.a.com");
 	EXPECT_EQ(client.GetAnswer()[0].GetData(), "4.5.6.7");
 }
+
+TEST_F(Cname, aaaa_with_cname_only)
+{
+	smartdns::MockServer server_upstream;
+	smartdns::Server server;
+
+	server_upstream.Start("udp://0.0.0.0:61053", [](struct smartdns::ServerRequestContext *request) {
+		dns_add_CNAME(request->response_packet, DNS_RRS_AN, "perfops.byte-test.com", 1,
+					  "perfops.byte-test.com.bplslb.com");
+		if (request->qtype == DNS_T_A && request->domain == "perfops.byte-test.com.bplslb.com") {
+			smartdns::MockServer::AddIP(request, request->domain.c_str(), "1.2.3.4", 60);
+		}
+
+		return smartdns::SERVER_REQUEST_OK;
+	});
+
+	server.Start(R"""(bind [::]:60053
+server 127.0.0.1:61053
+)""");
+
+	smartdns::Client client;
+	ASSERT_TRUE(client.Query("perfops.byte-test.com", 60053, DNS_T_AAAA));
+	std::cout << client.GetResult() << std::endl;
+	ASSERT_EQ(client.GetStatus(), "NOERROR");
+	ASSERT_EQ(client.GetAnswerNum(), 1);
+	EXPECT_EQ(client.GetAnswer()[0].GetName(), "perfops.byte-test.com");
+	EXPECT_EQ(client.GetAnswer()[0].GetData(), "perfops.byte-test.com.bplslb.com.");
+}
