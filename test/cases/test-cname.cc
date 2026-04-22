@@ -214,7 +214,7 @@ server 127.0.0.1:61053
 )""");
 
 	smartdns::Client client;
-	ASSERT_TRUE(client.Query("perfops.byte-test.com", 60053, DNS_T_AAAA));
+	ASSERT_TRUE(client.Query("AAAA perfops.byte-test.com", 60053));
 	std::cout << client.GetResult() << std::endl;
 	ASSERT_EQ(client.GetStatus(), "NOERROR");
 	ASSERT_EQ(client.GetAnswerNum(), 1);
