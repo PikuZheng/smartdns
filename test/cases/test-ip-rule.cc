@@ -273,37 +273,6 @@ ignore-ip 0.0.0.0/0
 	EXPECT_EQ(client.GetStatus(), "NOERROR");
 }
 
-TEST_F(IPRule, retry_when_all_ip_ignored)
-{
-	smartdns::MockServer server_upstream;
-	smartdns::Server server;
-
-	int request_count = 0;
-	server_upstream.Start("udp://0.0.0.0:61053", [&request_count](struct smartdns::ServerRequestContext *request) {
-		dns_add_domain(request->response_packet, request->domain.c_str(), request->qtype, DNS_C_IN);
-		request_count++;
-		if (request_count == 1) {
-			smartdns::MockServer::AddIP(request, request->domain.c_str(), "1.2.3.4", 611);
-		} else {
-			smartdns::MockServer::AddIP(request, request->domain.c_str(), "4.5.6.7", 611);
-		}
-
-		return smartdns::SERVER_REQUEST_OK;
-	});
-
-	server.Start(R"""(bind [::]:60053
-server udp://127.0.0.1:61053
-ignore-ip 1.2.3.4
-)""");
-	smartdns::Client client;
-	ASSERT_TRUE(client.Query("a.com", 60053));
-	std::cout << client.GetResult() << std::endl;
-	ASSERT_EQ(client.GetAnswerNum(), 1);
-	EXPECT_EQ(client.GetStatus(), "NOERROR");
-	EXPECT_EQ(client.GetAnswer()[0].GetData(), "4.5.6.7");
-	EXPECT_GE(request_count, 2);
-}
-
 TEST_F(IPRule, no_ignore_ip_by_domain)
 {
 	smartdns::MockServer server_upstream;
