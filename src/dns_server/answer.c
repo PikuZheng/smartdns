@@ -494,6 +494,7 @@ int _dns_server_process_answer(struct dns_request *request, const char *domain, 
 	if (request->rcode == DNS_RC_SERVFAIL && has_result == 1 && is_skip == 1) {
 		tlog(TLOG_DEBUG, "all result is ignored, %s qtype: %d, rcode: %d, id: %d, retry.", domain, request->qtype,
 			 packet->head.rcode, packet->head.id);
+		request->rcode = DNS_RC_NOERROR;
 		request->passthrough = 1;
 		return DNS_CLIENT_ACTION_RETRY;
 	}
