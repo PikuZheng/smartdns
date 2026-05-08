@@ -501,10 +501,6 @@ int dns_cache_insert(struct dns_cache_key *cache_key, int rcode, int ttl, int sp
 
 int dns_cache_update_timer(struct dns_cache_key *key, int timeout)
 {
-	if (dns_cache_head.size <= 0) {
-		return -1;
-	}
-
 	struct dns_cache *dns_cache = _dns_cache_lookup(key);
 	if (dns_cache == NULL) {
 		return -1;
@@ -1030,7 +1026,6 @@ void dns_cache_destroy(void)
 		return;
 	}
 
-	dns_cache_head.size = 0;
 	dns_cache_flush();
 
 	pthread_mutex_destroy(&dns_cache_head.lock);
