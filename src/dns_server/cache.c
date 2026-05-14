@@ -596,21 +596,6 @@ void _dns_server_save_cache_to_file(void)
 	}
 
 	time(&now);
-	if (server.cache_save_pid > 0) {
-		int ret = waitpid(server.cache_save_pid, NULL, WNOHANG);
-		if (ret == server.cache_save_pid) {
-			server.cache_save_pid = 0;
-		} else if (ret < 0) {
-			tlog(TLOG_ERROR, "waitpid failed, errno %d, error info '%s'", errno, strerror(errno));
-			server.cache_save_pid = 0;
-		} else {
-			if (now - 30 > server.cache_save_time) {
-				kill(server.cache_save_pid, SIGKILL);
-			}
-			return;
-		}
-	}
-
 	if (check_time < 120) {
 		check_time = 120;
 	}
@@ -619,7 +604,7 @@ void _dns_server_save_cache_to_file(void)
 		return;
 	}
 
-	/* server is busy, skip*/
+	/* server is busy, skip */
 	pthread_mutex_lock(&server.request_list_lock);
 	if (list_empty(&server.request_list) != 0) {
 		pthread_mutex_unlock(&server.request_list_lock);
@@ -627,24 +612,11 @@ void _dns_server_save_cache_to_file(void)
 	}
 	pthread_mutex_unlock(&server.request_list_lock);
 
-	server.cache_save_time = now;
-
-	int pid = fork();
-	if (pid == 0) {
-		/* child process */
-		for (int i = 3; i < 1024; i++) {
-			close(i);
-		}
-
-		tlog_setlevel(TLOG_OFF);
-		_dns_server_cache_save(1);
-		_exit(0);
-	} else if (pid < 0) {
-		tlog(TLOG_DEBUG, "fork failed, errno %d, error info '%s'", errno, strerror(errno));
+	if (_dns_server_cache_save(1) != 0) {
 		return;
 	}
 
-	server.cache_save_pid = pid;
+	server.cache_save_time = now;
 }
 
 static dns_cache_tmout_action_t _dns_server_cache_expired(struct dns_cache *dns_cache)
