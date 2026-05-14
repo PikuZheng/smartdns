@@ -121,6 +121,14 @@ static int _dns_server_get_cache_timeout(struct dns_request *request, struct dns
 		timeout = 1;
 	}
 
+	/* spread timer-triggered prefetch to avoid synchronized bursts */
+	if (prefetch_time == 1 && timeout > 30) {
+		timeout += (rand() % 7) - 3;
+		if (timeout <= 0) {
+			timeout = 1;
+		}
+	}
+
 	return timeout;
 }
 
