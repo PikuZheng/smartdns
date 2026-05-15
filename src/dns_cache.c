@@ -338,7 +338,9 @@ static int _dns_cache_replace(struct dns_cache_key *cache_key, int rcode, int tt
 	list_del(&dns_cache->list);
 	list_add_tail(&dns_cache->list, &dns_cache_head.cache_list);
 	if (dns_timer_mod(&dns_cache->timer, timeout) == 0) {
+		dns_cache_get(dns_cache);
 		dns_cache->timer.expires = timeout;
+		dns_timer_add(&dns_cache->timer);
 	}
 	ret = 0;
 
@@ -532,7 +534,9 @@ int dns_cache_update_timer(struct dns_cache_key *key, int timeout)
 	}
 
 	if (dns_timer_mod(&dns_cache->timer, timeout) == 0) {
+		dns_cache_get(dns_cache);
 		dns_cache->timer.expires = timeout;
+		dns_timer_add(&dns_cache->timer);
 	}
 	ret = 0;
 
