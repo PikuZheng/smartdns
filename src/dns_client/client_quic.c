@@ -517,8 +517,9 @@ static int _dns_client_quic_handle_send_result(struct dns_conn_stream *conn_stre
 	}
 
 	if (send_len == 0) {
-		*epoll_events = EPOLLIN | EPOLLOUT;
-		return 0;
+		/* treat zero write as closed/broken stream to avoid infinite resend loop */
+		errno = EPIPE;
+		return -1;
 	}
 
 	_dns_client_quic_consume_send_buffer(conn_stream, send_len);
