@@ -59,16 +59,6 @@ int _dns_server_set_to_pending_list(struct dns_request *request)
 		break;
 	}
 
-	if (pending_list != NULL && request->prefetch == 1) {
-		/*
-		 * A prefetch query for same key is already in-flight.
-		 * Drop duplicated prefetch waiter to avoid accumulating
-		 * internal pending requests and transient memory peaks.
-		 */
-		ret = 0;
-		goto out;
-	}
-
 	if (pending_list == NULL) {
 		pending_list = zalloc(1, sizeof(*pending_list));
 		if (pending_list == NULL) {
