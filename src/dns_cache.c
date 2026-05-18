@@ -206,6 +206,8 @@ static void dns_cache_expired(struct tw_base *base, struct tw_timer_list *timer,
 			mod_ret = dns_timer_mod(&dns_cache->timer, dns_cache->info.timeout);
 			goto out;
 		case DNS_CACHE_TMOUT_ACTION_DEL:
+			/* dns_cache_delete() already releases cache refs, avoid releasing again at out */
+			mod_ret = -1;
 			dns_cache_delete(dns_cache);
 			goto out;
 		case DNS_CACHE_TMOUT_ACTION_RETRY:
