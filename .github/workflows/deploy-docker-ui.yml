@@ -55,6 +55,9 @@ jobs:
           mkdir -p ${{ github.workspace }}/jemalloc
           curl -sSL  https://github.com/jemalloc/jemalloc/archive/refs/tags/5.3.0.tar.gz -o jemalloc.tar.gz
           tar -zxvf jemalloc.tar.gz --strip-components 1 -C jemalloc
+          mkdir -p ${{ github.workspace }}/zlib
+          curl -sSL https://zlib.net/zlib.tar.gz -o zlib.tar.gz
+          tar -zxvf zlib.tar.gz --strip-components 1 -C zlib
           rm docker-openssl.sh || true
           cat >> docker-openssl.sh << EOF
           apk add perl make coreutils tar pkgconfig dpkg binutils autoconf
@@ -81,9 +84,13 @@ jobs:
             ./configure --host=$GOARCH-linux-musl
           fi
           make
+          cd /workdir/zlib
+          ./configure --arch=$GOARCH
+          make
+          cp ./libz.so.1.* ../libz.so.1
           cd /workdir
-          export CFLAGS="-Os -ffunction-sections -fdata-sections -fomit-frame-pointer -fno-unwind-tables -fno-asynchronous-unwind-tables -I/workdir/openssl/include -Wno-error=date-time"
-          export LDFLAGS="-L /workdir/openssl -L /workdir/jemalloc/lib -ljemalloc"
+          export CFLAGS="-Os -ffunction-sections -fdata-sections -fomit-frame-pointer -fno-unwind-tables -fno-asynchronous-unwind-tables -I/workdir/openssl/include -Wno-error=date-time -I/workdir/zlib -DWITH_ZLIB"
+          export LDFLAGS="-L /workdir/openssl -L /workdir/jemalloc/lib -ljemalloc -L /workdir/zlib -lz"
           ./package/build-pkg.sh --platform linux --arch all --filearch $GOARCH-linux --outputdir /workdir/build
           EOF
           if  test "$GOARCH" = "armv7" ;then
@@ -122,7 +129,7 @@ jobs:
             cp /usr/local/musl/$GOARCH-unknown-linux-musl/lib/libgcc_s.so.1 ./
             cp /usr/local/musl/$GOARCH-unknown-linux-musl/lib/libstdc++.so.6 ./
           fi
-          musl-strip libsmartdns_ui.so && musl-strip ../../src/smartdns && musl-strip ../../openssl/libcrypto.so.3 && musl-strip ../../openssl/libssl.so.3 && musl-strip libgcc_s.so.1 && musl-strip libstdc++.so.6 && musl-strip ../../jemalloc/lib/libjemalloc.so.2  || true
+          musl-strip libsmartdns_ui.so && musl-strip ../../src/smartdns && musl-strip ../../openssl/libcrypto.so.3 && musl-strip ../../openssl/libssl.so.3 && musl-strip libgcc_s.so.1 && musl-strip libstdc++.so.6 && musl-strip ../../jemalloc/lib/libjemalloc.so.2 && musl-strip ../../libz.so.1  || true
           EOF
           if  test "$GOARCH" = "armv7" ;then
             docker run -i --rm -v ${{ github.workspace }}:/workdir messense/rust-musl-cross:armv7-musleabihf sh /workdir/docker-build.sh
@@ -135,7 +142,7 @@ jobs:
           ENV TZ="Asia/Shanghai"
           ENV MALLOC_CONF="background_thread:false,dirty_decay_ms:0,muzzy_decay_ms:0,narenas:1,tcache:false,metadata_thp:disabled"
           COPY ./src/smartdns /usr/sbin
-          COPY ./openssl/libcrypto.so ./openssl/libssl.so ./plugin/smartdns-ui/libsmartdns_ui.so ./plugin/smartdns-ui/libgcc_s.so.1 ./plugin/smartdns-ui/libstdc++.so.6 ./jemalloc/lib/libjemalloc.so.2 /usr/lib
+          COPY ./openssl/libcrypto.so ./openssl/libssl.so ./libz.so.1 ./plugin/smartdns-ui/libsmartdns_ui.so ./plugin/smartdns-ui/libgcc_s.so.1 ./plugin/smartdns-ui/libstdc++.so.6 ./jemalloc/lib/libjemalloc.so.2 /usr/lib
           COPY ./smartdns-webui/out /wwwroot
           RUN apk add --no-cache tzdata ca-certificates && (ldd /usr/sbin/smartdns 2>&1 | grep -q "libatomic.so" && apk add --no-cache libatomic || true)
           RUN ln -sf /usr/lib/libssl.so /usr/lib/libssl.so.3 && ln -sf /usr/lib/libcrypto.so /usr/lib/libcrypto.so.3
@@ -169,8 +176,8 @@ jobs:
           cat >> docker-openssl.sh << EOF
           apk add perl make coreutils tar pkgconfig dpkg binutils
           cd /workdir
-          export CFLAGS="-I /workdir/openssl/include"
-          export LDFLAGS="-L /workdir/openssl"
+          export CFLAGS="-I /workdir/openssl/include -Wno-error=date-time -I/workdir/zlib -DWITH_ZLIB"
+          export LDFLAGS="-L /workdir/openssl -L /workdir/zlib -lz"
           ./package/build-pkg.sh --platform linux --arch all --filearch $GOARCH-linux --outputdir /workdir/build
           EOF
           if  test "$GOARCH" = "armv7" ;then
@@ -200,6 +207,7 @@ jobs:
           mkdir usr/local/lib/smartdns -p
           cp ${{ github.workspace }}/openssl/libcrypto.so ./usr/local/lib/smartdns/libcrypto.so.3
           cp ${{ github.workspace }}/openssl/libssl.so ./usr/local/lib/smartdns/libssl.so.3
+          cp ${{ github.workspace }}/libz.so.1 ./usr/local/lib/smartdns/libz.so.1
           cp ${{ github.workspace }}/plugin/smartdns-ui/libgcc_s.so.1 ./usr/local/lib/smartdns/libgcc_s.so.1
           cp ${{ github.workspace }}/plugin/smartdns-ui/libsmartdns_ui.so ./usr/local/lib/smartdns/smartdns_ui.so
           mkdir usr/share/smartdns/wwwroot -p
