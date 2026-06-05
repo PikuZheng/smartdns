@@ -85,8 +85,8 @@ jobs:
           fi
           make
           cd /workdir/zlib
-          ./configure --arch=$GOARCH
-          make
+          ./configure
+          make clean && make
           cp ./libz.so.1.* ../libz.so.1
           cd /workdir
           export CFLAGS="-Os -ffunction-sections -fdata-sections -fomit-frame-pointer -fno-unwind-tables -fno-asynchronous-unwind-tables -I/workdir/openssl/include -Wno-error=date-time -I/workdir/zlib -DWITH_ZLIB"
