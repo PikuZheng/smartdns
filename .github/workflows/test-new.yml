@@ -144,7 +144,7 @@ jobs:
           #修改版本号
           sed -i "s/VER=.*/VER=${{needs.get-version.outputs.CUR_VERSION}}/" package/build-pkg.sh
           #单独编译luci和luci-compat
-          docker run -i --rm -v ${{ github.workspace }}:/workdir alpine:3 sh -c "apk update && apk add tar build-base && /workdir/package/build-pkg.sh --only-package --platform $GOARCH --arch all --filearch $GOARCH-all --outputdir /workdir/build"
+          docker run -i --rm -v ${{ github.workspace }}:/workdir alpine:3 sh -c "apk update && apk add tar build-base && cd /workdir && /workdir/package/build-pkg.sh --only-package --platform $GOARCH --arch all --filearch $GOARCH-all --outputdir /workdir/build"
 
 #      - name: Upload To Artifact
 #        uses: actions/upload-artifact@v2
