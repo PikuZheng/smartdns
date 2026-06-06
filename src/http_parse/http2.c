@@ -1803,6 +1803,10 @@ struct http2_stream *http2_ctx_accept_stream(struct http2_ctx *ctx)
 	{
 		if (_http2_stream_is_accept_ready(ctx, stream)) {
 			stream->accepted = 1;
+			/* Stream may already have body data (DATA frames arrived before
+			 * acceptance) or END_STREAM set. Enqueue into ready queue so
+			 * the next poll cycle sees this readable data. */
+			_http2_stream_mark_ready(stream);
 			pthread_mutex_unlock(&ctx->mutex);
 			if (stream) {
 				/* take ownership */
@@ -1862,6 +1866,8 @@ static void _http2_ctx_collect_ready_streams(struct http2_ctx *ctx, struct http2
 											 int *count, int check_writable)
 {
 	struct http2_stream *stream, *tmp;
+	struct list_head processed_list;
+	INIT_LIST_HEAD(&processed_list);
 
 	/* Drain the ready queue: streams that received new body data.
 	 * These are enqueued directly by _http2_process_data_frame() and
@@ -1869,6 +1875,15 @@ static void _http2_ctx_collect_ready_streams(struct http2_ctx *ctx, struct http2
 	 * full O(N) scan of ctx->streams. */
 	list_for_each_entry_safe(stream, tmp, &ctx->ready_streams, ready_node)
 	{
+		/* Only return streams that have been accepted */
+		if (!stream->accepted) {
+			/* Not yet accepted — remove from ready queue since it cannot be
+			 * served until accepted. Will be re-enqueued when data arrives
+			 * after acceptance. */
+			list_del_init(&stream->ready_node);
+			continue;
+		}
+
 		if (*count >= max_items) {
 			break;
 		}
@@ -1883,54 +1898,29 @@ static void _http2_ctx_collect_ready_streams(struct http2_ctx *ctx, struct http2
 
 		int readable = has_body_data || stream_ended;
 
-		if (readable) {
-			int writable = stream->state == HTTP2_STREAM_OPEN ||
-						   stream->state == HTTP2_STREAM_HALF_CLOSED_REMOTE;
+		int writable = stream->state == HTTP2_STREAM_OPEN ||
+					   stream->state == HTTP2_STREAM_HALF_CLOSED_REMOTE;
+
+		if (readable || (check_writable && writable)) {
 			items[*count].stream = http2_stream_get(stream);
 			items[*count].readable = readable;
 			items[*count].writable = writable;
 			(*count)++;
-		}
-
-		/* Remove from ready queue: if data remains after the app reads
-		 * (partial read), http2_stream_read_body() will re-enqueue. */
-		list_del_init(&stream->ready_node);
-	}
-
-	/* If writable checking is requested, also scan for streams that are
-	 * writable but may not have been in the ready queue (e.g. a stream
-	 * that became writable due to window updates but has no incoming data). */
-	if (check_writable && *count < max_items) {
-		list_for_each_entry(stream, &ctx->streams, node)
-		{
-			if (*count >= max_items) {
-				break;
-			}
-
-			if (!stream->accepted) {
-				continue;
-			}
-
-			/* Skip if already in ready queue (handled above) */
-			if (!list_empty(&stream->ready_node)) {
-				continue;
-			}
-
-			int has_body_data = stream->body_buffer_len > stream->body_read_offset;
-			int stream_ended = (stream->end_stream_received || stream->state == HTTP2_STREAM_CLOSED) &&
-							   !stream->end_stream_read_handled;
-			int readable = has_body_data || stream_ended;
-			int writable = stream->state == HTTP2_STREAM_OPEN ||
-						   stream->state == HTTP2_STREAM_HALF_CLOSED_REMOTE;
-
-			if (writable) {
-				items[*count].stream = http2_stream_get(stream);
-				items[*count].readable = readable;
-				items[*count].writable = writable;
-				(*count)++;
-			}
+			/* Move to tail for fairness */
+			list_move_tail(&stream->ready_node, &processed_list);
+		} else if (!has_body_data && stream_ended) {
+			/* No more data and EOF already handled: remove from ready queue */
+			list_del_init(&stream->ready_node);
+		} else {
+			/* Still readable/writable but we hit max_items limit:
+			 * leave in ready queue for next poll call */
 		}
 	}
+
+	/* Append processed streams to tail of ready queue for re-poll fairness.
+	 * Streams removed from ready queue by http2_stream_read_body() (when all
+	 * data consumed) or by _http2_remove_stream() / _http2_mark_stream_reset(). */
+	list_splice_tail(&processed_list, &ctx->ready_streams);
 }
 
 static int _http2_ctx_poll(struct http2_ctx *ctx, struct http2_poll_item *items, int max_items, int *ret_count,
@@ -2513,6 +2503,10 @@ int http2_stream_read_body(struct http2_stream *stream, uint8_t *data, int len)
 		/* Decompression failed, return error */
 		stream->end_stream_read_handled = 1;
 		stream->body_read_offset = stream->body_buffer_len;
+		/* No more readable data: remove from ready queue */
+		if (!list_empty(&stream->ready_node)) {
+			list_del_init(&stream->ready_node);
+		}
 		if (ctx) {
 			pthread_mutex_unlock(&ctx->mutex);
 		}
@@ -2543,6 +2537,10 @@ int http2_stream_read_body(struct http2_stream *stream, uint8_t *data, int len)
 		/* If stream ended or connection has error, return 0 (EOF) */
 		if (stream->end_stream_received || stream->state == HTTP2_STREAM_CLOSED || (!ctx || ctx->status < 0)) {
 			stream->end_stream_read_handled = 1;
+			/* No more readable data: remove from ready queue */
+			if (!list_empty(&stream->ready_node)) {
+				list_del_init(&stream->ready_node);
+			}
 			if (ctx) {
 				pthread_mutex_unlock(&ctx->mutex);
 			}
@@ -2566,9 +2564,17 @@ int http2_stream_read_body(struct http2_stream *stream, uint8_t *data, int len)
 		stream->end_stream_read_handled = 1;
 	}
 
-	/* If data remains in buffer, re-enqueue into ready list for next poll */
-	if (stream->accepted && stream->body_buffer_len > stream->body_read_offset) {
-		_http2_stream_mark_ready(stream);
+	/* Remove from ready queue if all data has been consumed and stream is done.
+	 * Otherwise, re-enqueue if data remains for the next poll cycle. */
+	if (stream->accepted) {
+		if (stream->body_buffer_len > stream->body_read_offset) {
+			_http2_stream_mark_ready(stream);
+		} else if (stream->end_stream_read_handled) {
+			/* All data consumed and EOF reported: remove from ready queue */
+			if (!list_empty(&stream->ready_node)) {
+				list_del_init(&stream->ready_node);
+			}
+		}
 	}
 
 	if (ctx) {
