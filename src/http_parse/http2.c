@@ -1010,21 +1010,34 @@ static int _http2_process_data_frame(struct http2_ctx *ctx, int stream_id, const
 	/* Stream now has readable body data - immediately enqueue to ready list */
 	_http2_stream_mark_ready(stream);
 
+	/* Update flow control: send both connection-level and stream-level
+	 * WINDOW_UPDATE frames in a single _http2_send_frame() call.  This
+	 * halves the number of lock/unlock + bio_write (SSL_write) cycles per
+	 * received DATA frame — a measurable saving in the DoH upstream hot
+	 * path where each client query typically receives exactly one DATA
+	 * frame as its DNS response. */
 	if (len > 0) {
-		/* Update flow control */
-		/* Send WINDOW_UPDATE immediately to prevent flow control deadlock */
-		/* Connection-level WINDOW_UPDATE */
-		if (_http2_send_window_update(ctx, 0, len) < 0) {
+		int need_stream_wu = (!stream->end_stream_received && stream->state != HTTP2_STREAM_CLOSED);
+		int nframes = 1 + (need_stream_wu ? 1 : 0);
+		const int WU_FRAME_SIZE = HTTP2_FRAME_HEADER_SIZE + 4;
+		uint8_t frames[2 * WU_FRAME_SIZE];
+
+		/* Connection-level WINDOW_UPDATE (stream_id = 0) */
+		_http2_write_frame_header(frames, 4, HTTP2_FRAME_WINDOW_UPDATE, 0, 0);
+		write_uint32(frames + HTTP2_FRAME_HEADER_SIZE, len & 0x7FFFFFFF);
+
+		if (need_stream_wu) {
+			/* Stream-level WINDOW_UPDATE */
+			_http2_write_frame_header(frames + WU_FRAME_SIZE, 4, HTTP2_FRAME_WINDOW_UPDATE, 0, stream_id);
+			write_uint32(frames + WU_FRAME_SIZE + HTTP2_FRAME_HEADER_SIZE, len & 0x7FFFFFFF);
+		}
+
+		if (_http2_send_frame(ctx, frames, nframes * WU_FRAME_SIZE) < 0) {
 			return -1;
 		}
-		ctx->recv_conn_window_size += len;
 
-		/* No more DATA can arrive on a stream after END_STREAM. */
-		if (!stream->end_stream_received && stream->state != HTTP2_STREAM_CLOSED) {
-			if (_http2_send_window_update(ctx, stream_id, len) < 0) {
-				ctx->recv_conn_window_size -= len;
-				return -1;
-			}
+		ctx->recv_conn_window_size += len;
+		if (need_stream_wu) {
 			stream->recv_window_size += len;
 		}
 	}
