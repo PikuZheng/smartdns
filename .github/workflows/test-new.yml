@@ -74,8 +74,8 @@ jobs:
           fi
           make all
           cd /workdir/zlib
-          ./configure --arch=$GOARCH
-          make
+          ./configure
+          make clean && make
           cd /workdir
           export CFLAGS="-I /workdir/openssl/include -I /workdir/zlib -DWITH_ZLIB -Wno-error=date-time"
           export LDFLAGS="-L /workdir/openssl -L /workdir/zlib -lz"
