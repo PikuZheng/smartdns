@@ -59,6 +59,8 @@ jobs:
           curl -sSL https://zlib.net/zlib.tar.gz -o zlib.tar.gz
           tar -zxvf zlib.tar.gz --strip-components 1 -C zlib
           cat >> docker-build.sh << EOF
+          echo http://dl-cdn.alpinelinux.org/alpine/v3.23/main >> /etc/apk/repositories
+          apk update && apk upgrade apk-tools
           apk add perl make coreutils tar pkgconfig dpkg binutils
           cd /workdir/openssl
           if [ "$GOARCH" == "mipsel" ] || [ "$GOARCH" == "mips" ] || [ "$GOARCH" == "mips-sf" ] || [ "$GOARCH" == "mipsel-sf" ] ;then
