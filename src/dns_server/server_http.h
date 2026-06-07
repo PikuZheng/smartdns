@@ -16,20 +16,20 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef _DNS_CONF_DHCP_LEASE_DNSMASQ_H_
-#define _DNS_CONF_DHCP_LEASE_DNSMASQ_H_
+#ifndef _DNS_SERVER_HTTP_
+#define _DNS_SERVER_HTTP_
 
-#include "dns_conf.h"
-#include "smartdns/dns_conf.h"
+#include "dns_server.h"
+#include <sys/epoll.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif /*__cplusplus */
 
-int _conf_dhcp_lease_dnsmasq_file(void *data, int argc, char *argv[]);
-int _conf_dhcp_lease_odhcpd_file(void *data, int argc, char *argv[]);
+int _dns_server_socket_http(struct dns_bind_ip *bind_ip);
 
-int dns_server_check_update_hosts(void);
+int _dns_server_reply_http(struct dns_request *request, struct dns_server_conn_tcp_client *tcpclient, void *packet,
+						   unsigned short len);
 
 #ifdef __cplusplus
 }

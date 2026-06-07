@@ -171,6 +171,16 @@ static SSL_SESSION *_ssl_get1_session(struct dns_server_info *server)
 	return ret;
 }
 
+static void _dns_client_tls_clear_session(struct dns_server_info *server_info)
+{
+	pthread_mutex_lock(&server_info->lock);
+	if (server_info->ssl_session) {
+		SSL_SESSION_free(server_info->ssl_session);
+		server_info->ssl_session = NULL;
+	}
+	pthread_mutex_unlock(&server_info->lock);
+}
+
 int dns_client_spki_decode(const char *spki, unsigned char *spki_data_out, int spki_data_out_max_len)
 {
 	int spki_data_len = -1;
@@ -295,9 +305,15 @@ static int _dns_client_set_trusted_cert(SSL_CTX *ssl_ctx)
 	return 0;
 }
 
+static int _dns_client_has_explicit_ca_config(void)
+{
+	return dns_conf.ca_file[0] || dns_conf.ca_path[0];
+}
+
 SSL_CTX *_ssl_ctx_get(int is_quic)
 {
 	SSL_CTX **ssl_ctx = NULL;
+	int explicit_ca_config = _dns_client_has_explicit_ca_config();
 	pthread_mutex_lock(&client.server_list_lock);
 	if (is_quic) {
 		ssl_ctx = &client.ssl_quic_ctx;
@@ -336,6 +352,12 @@ SSL_CTX *_ssl_ctx_get(int is_quic)
 	SSL_CTX_set_session_cache_mode(*ssl_ctx, SSL_SESS_CACHE_CLIENT);
 	SSL_CTX_sess_set_cache_size(*ssl_ctx, DNS_MAX_SERVERS);
 	if (_dns_client_set_trusted_cert(*ssl_ctx) != 0) {
+		if (explicit_ca_config) {
+			tlog(TLOG_ERROR, "load configured CA certificate failed.");
+			goto errout;
+		}
+
+		tlog(TLOG_WARN, "load system CA certificate failed, disable upstream certificate verification.");
 		SSL_CTX_set_verify(*ssl_ctx, SSL_VERIFY_NONE, NULL);
 		client.ssl_verify_skip = 1;
 	}
@@ -1017,6 +1039,7 @@ int _dns_client_process_tls(struct dns_server_info *server_info, struct epoll_ev
 				return 0;
 			}
 
+			_dns_client_tls_clear_session(server_info);
 			if (ssl_ret != SSL_ERROR_SYSCALL) {
 				unsigned long ssl_err = ERR_get_error();
 				int ssl_reason = ERR_GET_REASON(ssl_err);

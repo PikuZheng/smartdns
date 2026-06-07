@@ -99,6 +99,7 @@ enum domain_rule {
 	DOMAIN_RULE_RESPONSE_MODE, /* Response mode */
 	DOMAIN_RULE_CNAME,         /* CNAME rule */
 	DOMAIN_RULE_TTL,           /* TTL control */
+	DOMAIN_RULE_TXT,           /* TXT record */
 
 	DOMAIN_RULE_MAX,
 };
@@ -120,6 +121,7 @@ typedef enum {
 	DNS_BIND_TYPE_TCP,
 	DNS_BIND_TYPE_TLS,
 	DNS_BIND_TYPE_HTTPS,
+	DNS_BIND_TYPE_HTTP,
 } DNS_BIND_TYPE;
 
 typedef enum {
@@ -341,6 +343,11 @@ struct dns_srv_record_rule {
 	struct list_head record_list;
 };
 
+struct dns_txt_record_rule {
+	struct dns_rule head;
+	struct list_head record_list;
+};
+
 struct dns_group_table {
 	DECLARE_HASHTABLE(group, 8);
 };
@@ -362,6 +369,7 @@ extern struct dns_ptr_table dns_ptr_table;
 typedef enum dns_hosts_type {
 	DNS_HOST_TYPE_HOST = 0,
 	DNS_HOST_TYPE_DNSMASQ = 1,
+	DNS_HOST_TYPE_ODHCPD = 2,
 } dns_hosts_type;
 
 struct dns_hosts {
@@ -664,6 +672,10 @@ struct dns_srv_record {
 	unsigned short port;
 };
 
+struct dns_txt_record {
+	struct list_head list;
+	char text[DNS_MAX_CNAME_LEN];
+};
 
 struct dns_conf_plugin {
 	struct hlist_node node;
