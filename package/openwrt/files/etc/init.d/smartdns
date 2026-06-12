@@ -56,7 +56,7 @@ set_forward_dnsmasq()
 	uci_batch="$uci_batch set dhcp.@dnsmasq[0].domainneeded=0\n"
 	echo -e "$uci_batch" | uci batch -q -
 	uci commit dhcp
-	/etc/init.d/dnsmasq reload
+	/etc/init.d/dnsmasq restart
 }
 
 stop_forward_dnsmasq()
@@ -76,7 +76,7 @@ stop_forward_dnsmasq()
 	uci_batch="$uci_batch set dhcp.@dnsmasq[0].domainneeded=1\n"
 	echo -e "$uci_batch" | uci batch -q -
 	uci commit dhcp
-	[ "$norestart" != "1" ] && /etc/init.d/dnsmasq reload
+	[ "$norestart" != "1" ] && /etc/init.d/dnsmasq restart
 }
 
 set_main_dns()
@@ -107,7 +107,7 @@ set_main_dns()
 
 	echo -e "$uci_batch" | uci batch -q -
 	uci commit dhcp
-	/etc/init.d/dnsmasq reload
+	/etc/init.d/dnsmasq restart
 }
 
 stop_main_dns()
@@ -127,7 +127,7 @@ stop_main_dns()
 	uci_batch="$uci_batch del_list dhcp.lan.dhcp_option=\"6,$hostip\"\n"
 	echo -e "$uci_batch" | uci batch -q -
 	uci commit dhcp
-	[ "$norestart" != "1" ] && /etc/init.d/dnsmasq reload
+	[ "$norestart" != "1" ] && /etc/init.d/dnsmasq restart
 }
 
 clear_iptable()
@@ -576,6 +576,9 @@ load_second_server()
 	config_get seconddns_nftset_name "$section" "seconddns_nftset_name" ""
 	[ -z "$seconddns_nftset_name" ] || ARGS="$ARGS -nftset $seconddns_nftset_name"
 
+	config_get_bool ddr "$section" "ddr" "0"
+	[ "$ddr" = "1" ] && ARGS="$ARGS -ddr"
+
 	config_get_bool bind_device "$section" "bind_device" "0"
 	config_get bind_device_name "$section" "bind_device_name" "${lan_device}"
 	[ ! -z "$bind_device_name" ] && [ "$bind_device" = "1" ] && device="${bind_device_name}"
@@ -659,6 +662,8 @@ load_service()
 	config_get bind_cert_key "$section" "bind_cert_key" ""
 	config_get bind_cert_key_pass "$section" "bind_cert_key_pass" ""
 	config_get server_flags "$section" "server_flags" ""
+	config_get_bool ddr "$section" "ddr" "0"
+	[ "$ddr" = "1" ] && server_flags="$server_flags -ddr"
 
 	config_get auto_update_week_time "$section" "auto_update_week_time" "*"
 	config_get auto_update_day_time "$section" "auto_update_day_time" "5"
