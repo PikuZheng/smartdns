@@ -783,8 +783,13 @@ static int _http2_send_headers_frame(struct http2_ctx *ctx, uint32_t stream_id, 
 			header_block = new_block;
 			header_block_size = new_size;
 		}
+		/* Server: use literal-without-indexing for content-length only,
+		 * because its value changes per response.  Fixed-value headers
+		 * (e.g. :status=200, content-type=application/dns-message) use
+		 * incremental indexing for efficient compression. */
+		int no_indexing = (!ctx->is_client && strcasecmp(field->name, "content-length") == 0);
 		int encode_ret = hpack_encode_header(&ctx->encoder, field->name, field->value, header_block + header_block_len,
-											 header_block_size - header_block_len);
+											 header_block_size - header_block_len, no_indexing);
 		if (encode_ret < 0) {
 			goto cleanup;
 		}
@@ -2123,7 +2128,10 @@ static void _http2_ctx_collect_ready_streams(struct http2_ctx *ctx, struct http2
 		int has_body_data = stream->body_buffer_len > stream->body_read_offset;
 		int stream_ended = (stream->end_stream_received || stream->state == HTTP2_STREAM_CLOSED) && !stream->end_stream_read_handled;
 
-		int readable = has_body_data || stream_ended;
+		/* For server-side: once response is fully sent (end_stream_sent), no need to
+		 * report stream-ended readability since the app has already processed the request.
+		 * Only report readable if there is actual body data remaining to be read. */
+		int readable = has_body_data || (stream_ended && !(!ctx->is_client && stream->end_stream_sent));
 		int writable = stream->state == HTTP2_STREAM_OPEN || stream->state == HTTP2_STREAM_HALF_CLOSED_REMOTE;
 
 		if (readable || (check_writable && writable)) {
