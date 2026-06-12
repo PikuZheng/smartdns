@@ -2142,3 +2142,176 @@ TEST_F(LIBHTTP2, StressTest)
 	server_thread.join();
 	client_thread.join();
 }
+
+TEST_F(LIBHTTP2, HpackDynamicTable3000)
+{
+	/* 3000 sequential GET requests on one connection to verify:
+	 * 1. content-type=application/dns-message correctly indexed in dynamic table
+	 * 2. No data duplication (stream not re-reported as readable) */
+	const int N = 3000;
+	std::atomic<int> srv_done(0);
+	std::atomic<int> cli_done(0);
+	std::atomic<bool> fail(false);
+	std::atomic<bool> quit(false);
+
+	std::thread srv([&]() {
+		auto *ctx = http2_ctx_server_new("srv", bio_read, bio_write, &server_sock, NULL);
+		ASSERT_NE(ctx, nullptr);
+		auto t0 = std::chrono::steady_clock::now();
+		int r = 0;
+		while (std::chrono::steady_clock::now() - t0 < std::chrono::seconds(5)) {
+			struct pollfd p = {server_sock, POLLIN, 0};
+			if (poll(&p, 1, 10) == 0)
+				continue;
+			r = http2_ctx_handshake(ctx);
+			if (r == 1 || r < 0)
+				break;
+		}
+		ASSERT_EQ(r, 1) << "handshake";
+
+		t0 = std::chrono::steady_clock::now();
+		while (!quit && !fail && std::chrono::steady_clock::now() - t0 < std::chrono::seconds(60)) {
+			struct pollfd p = {server_sock, POLLIN, 0};
+			poll(&p, 1, 10);
+			struct http2_poll_item its[64] = {};
+			int n = 0;
+			http2_ctx_poll(ctx, its, 64, &n);
+			for (int i = 0; i < n; i++) {
+				if (its[i].stream == nullptr && its[i].readable)
+					http2_ctx_accept_stream(ctx); /* take ownership, closed at end */
+				else if (its[i].stream && its[i].readable) {
+					auto *s = its[i].stream;
+					uint8_t d[32];
+					http2_stream_read_body(s, d, sizeof(d));
+					if (http2_stream_is_end(s)) {
+						char b[128];
+						int bl = snprintf(b, sizeof(b), "pkt-%d", srv_done.load());
+						char cl[16];
+						snprintf(cl, sizeof(cl), "%d", bl);
+						struct http2_header_pair h[] = {
+							{"content-type", "application/dns-message"},
+							{"content-length", cl}, {NULL, NULL}};
+						ASSERT_EQ(http2_stream_set_response(s, 200, h, 2), 0);
+						ASSERT_EQ(http2_stream_write_body(s, (const uint8_t *)b, bl, 1), bl);
+						srv_done++;
+					}
+				}
+				if (its[i].stream)
+					http2_stream_put(its[i].stream);
+			}
+			/* verify: already-processed streams are NOT re-reported */
+			for (int i = 0; i < n; i++) {
+				if (its[i].stream && its[i].readable) {
+					uint8_t x[8];
+					if (http2_stream_read_body(its[i].stream, x, sizeof(x)) > 0)
+						fail = true;
+				}
+			}
+		}
+		http2_ctx_close(ctx);
+	});
+
+	std::thread cli([&]() {
+		usleep(50000);
+		auto *ctx = http2_ctx_client_new("cli", bio_read, bio_write, &client_sock, NULL);
+		ASSERT_NE(ctx, nullptr);
+		auto t0 = std::chrono::steady_clock::now();
+		int r = 0;
+		while (std::chrono::steady_clock::now() - t0 < std::chrono::seconds(5)) {
+			struct pollfd p = {client_sock, POLLIN, 0};
+			poll(&p, 1, 10);
+			r = http2_ctx_handshake(ctx);
+			if (r == 1 || r < 0)
+				break;
+		}
+		ASSERT_EQ(r, 1);
+
+		std::vector<struct http2_stream *> ss;
+		ss.reserve(N);
+		char path[128];
+		snprintf(path, sizeof(path), "/dns-query?dns=AAABAAAA");
+		for (int i = 0; i < N; i++) {
+			auto *s = http2_stream_new(ctx);
+			ASSERT_NE(s, nullptr);
+			ss.push_back(s);
+			ASSERT_EQ(http2_stream_set_request(s, "GET", path, NULL, NULL), 0);
+
+			if (i % 50 == 0 || i == N - 1) {
+				struct pollfd p = {client_sock, POLLIN, 0};
+				poll(&p, 1, 5);
+				struct http2_poll_item its[64] = {};
+				int n = 0;
+				http2_ctx_poll_readable(ctx, its, 64, &n);
+				for (int j = 0; j < n; j++) {
+					if (its[j].stream == nullptr || !its[j].readable) {
+						if (its[j].stream)
+							http2_stream_put(its[j].stream);
+						continue;
+					}
+					auto *s2 = its[j].stream;
+					if (http2_stream_get_status(s2) <= 0) {
+						http2_stream_put(s2);
+						continue;
+					}
+					const char *ct = http2_stream_get_header(s2, "content-type");
+					if (ct == nullptr || strcmp(ct, "application/dns-message")) {
+						fail = true;
+						ADD_FAILURE() << "HPACK index error at resp " << cli_done.load();
+					}
+					uint8_t body[512];
+					while (http2_stream_read_body(s2, body, sizeof(body)) > 0)
+						;
+					if (http2_stream_is_end(s2))
+						cli_done++;
+					http2_stream_put(s2);
+				}
+			}
+		}
+
+		t0 = std::chrono::steady_clock::now();
+		while (cli_done < N && !fail &&
+		       std::chrono::steady_clock::now() - t0 < std::chrono::seconds(60)) {
+			struct pollfd p = {client_sock, POLLIN, 0};
+			poll(&p, 1, 20);
+			struct http2_poll_item its[64] = {};
+			int n = 0;
+			http2_ctx_poll_readable(ctx, its, 64, &n);
+			for (int j = 0; j < n; j++) {
+				if (its[j].stream == nullptr || !its[j].readable) {
+					if (its[j].stream)
+						http2_stream_put(its[j].stream);
+					continue;
+				}
+				auto *s = its[j].stream;
+				if (http2_stream_get_status(s) <= 0) {
+					http2_stream_put(s);
+					continue;
+				}
+				const char *ct = http2_stream_get_header(s, "content-type");
+				if (ct == nullptr || strcmp(ct, "application/dns-message")) {
+					fail = true;
+					ADD_FAILURE() << "HPACK index error at resp " << cli_done.load();
+				}
+				uint8_t b[512];
+				while (http2_stream_read_body(s, b, sizeof(b)) > 0)
+					;
+				if (http2_stream_is_end(s))
+					cli_done++;
+				http2_stream_put(s);
+			}
+		}
+
+		EXPECT_FALSE(fail);
+		EXPECT_EQ(cli_done, N) << cli_done.load() << "/" << N;
+		for (auto s : ss)
+			http2_stream_close(s);
+		http2_ctx_close(ctx);
+		quit = true;
+	});
+
+	srv.join();
+	cli.join();
+	EXPECT_FALSE(fail);
+	EXPECT_EQ(cli_done, N);
+	EXPECT_EQ(srv_done, N);
+}
