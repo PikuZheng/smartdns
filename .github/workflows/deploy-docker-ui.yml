@@ -37,6 +37,10 @@ jobs:
       GOARCH: ${{ matrix.goarch }}
     steps:
       - uses: actions/checkout@v3
+      - uses: actions/checkout@v3
+        with:
+          ref: BUILD-DEPENDENCIES
+          fetch-depth: 1
       - uses: docker/setup-qemu-action@v2
       - uses: docker/setup-buildx-action@v2
         with:
@@ -50,13 +54,13 @@ jobs:
           sed -i "s/VER=.*/VER=${{needs.get-version.outputs.CUR_VERSION}}/" ${{ github.workspace }}/package/build-pkg.sh
           sed -i 's/^HAS_UNWIND.*/HAS_UNWIND := 0/' ${{ github.workspace }}/src/Makefile
           mkdir -p ${{ github.workspace }}/openssl
-          curl -sSL https://github.com/openssl/openssl/releases/download/openssl-3.5.7/openssl-3.5.7.tar.gz -o openssl.tar.gz
+          #curl -sSL https://github.com/openssl/openssl/releases/download/openssl-3.5.7/openssl-3.5.7.tar.gz -o openssl.tar.gz
           tar -zxvf openssl.tar.gz --strip-components 1 -C openssl
           mkdir -p ${{ github.workspace }}/jemalloc
-          curl -sSL  https://github.com/jemalloc/jemalloc/archive/refs/tags/5.3.0.tar.gz -o jemalloc.tar.gz
+          #curl -sSL  https://github.com/jemalloc/jemalloc/archive/refs/tags/5.3.0.tar.gz -o jemalloc.tar.gz
           tar -zxvf jemalloc.tar.gz --strip-components 1 -C jemalloc
           mkdir -p ${{ github.workspace }}/zlib
-          curl -fL --retry 5 --retry-all-errors --retry-delay 2 https://zlib.net/zlib-1.3.2.tar.gz -o zlib.tar.gz
+          #curl -fL --retry 5 --retry-all-errors --retry-delay 2 https://zlib.net/zlib-1.3.2.tar.gz -o zlib.tar.gz
           tar -zxvf zlib.tar.gz --strip-components 1 -C zlib
           rm docker-openssl.sh || true
           cat >> docker-openssl.sh << EOF

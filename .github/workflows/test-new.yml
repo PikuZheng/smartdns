@@ -42,6 +42,10 @@ jobs:
       GOARCH: ${{ matrix.goarch }}
     steps:
       - uses: actions/checkout@v3
+      - uses: actions/checkout@v3
+        with:
+          ref: BUILD-DEPENDENCIES
+          fetch-depth: 1
       - name: Build
         continue-on-error: true
         run: |
@@ -53,10 +57,10 @@ jobs:
           sed -i "s/VER=.*/VER=${{needs.get-version.outputs.CUR_VERSION}}/" ${{ github.workspace }}/package/build-pkg.sh
           
           mkdir -p openssl
-          curl -sSL https://github.com/openssl/openssl/releases/download/openssl-3.5.7/openssl-3.5.7.tar.gz -o openssl.tar.gz
+          #curl -sSL https://github.com/openssl/openssl/releases/download/openssl-3.5.7/openssl-3.5.7.tar.gz -o openssl.tar.gz
           tar -zxvf openssl.tar.gz --strip-components 1 -C openssl
           mkdir -p zlib
-          curl -sSL https://zlib.net/zlib.tar.gz -o zlib.tar.gz
+          #curl -sSL https://zlib.net/zlib.tar.gz -o zlib.tar.gz
           tar -zxvf zlib.tar.gz --strip-components 1 -C zlib
           cat >> docker-build.sh << EOF
           echo http://dl-cdn.alpinelinux.org/alpine/v3.23/main >> /etc/apk/repositories
