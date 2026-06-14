@@ -46,6 +46,7 @@ jobs:
         with:
           ref: BUILD-DEPENDENCIES
           fetch-depth: 1
+          path: dependencies
       - name: Build
         continue-on-error: true
         run: |
@@ -58,10 +59,10 @@ jobs:
           
           mkdir -p openssl
           #curl -sSL https://github.com/openssl/openssl/releases/download/openssl-3.5.7/openssl-3.5.7.tar.gz -o openssl.tar.gz
-          tar -zxvf openssl.tar.gz --strip-components 1 -C openssl
+          tar -zxvf ./dependencies/openssl.tar.gz --strip-components 1 -C openssl
           mkdir -p zlib
           #curl -sSL https://zlib.net/zlib.tar.gz -o zlib.tar.gz
-          tar -zxvf zlib.tar.gz --strip-components 1 -C zlib
+          tar -zxvf ./dependencies/zlib.tar.gz --strip-components 1 -C zlib
           cat >> docker-build.sh << EOF
           echo http://dl-cdn.alpinelinux.org/alpine/v3.23/main >> /etc/apk/repositories
           apk update && apk upgrade apk-tools
