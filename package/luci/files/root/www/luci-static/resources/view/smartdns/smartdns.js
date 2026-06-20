@@ -48,7 +48,9 @@ function getServiceStatus() {
 
 function smartdnsServiceStatus() {
 	return Promise.all([
-		getServiceStatus()
+		getServiceStatus(),
+		uci.unload('dhcp'),
+		uci.load('dhcp')
 	]);
 }
 
@@ -75,8 +77,6 @@ function smartdnsRenderStatus(res) {
 	if (autoSetDnsmasq === '1' && smartdnsPort != '53') {
 		var matchLine = "127.0.0.1#" + smartdnsPort;
 
-		uci.unload('dhcp');
-		uci.load('dhcp');
 		if (dnsmasqServer == undefined || dnsmasqServer.indexOf(matchLine) < 0) {
 			renderHTML += "<br /><span style=\"color:red;font-weight:bold\">" + _("Dnsmasq Forwarded To Smartdns Failure") + "</span>";
 		}
