@@ -46,6 +46,7 @@ impl SmartdnsPlugin {
             .enable_all()
             .thread_name("smartdns-ui")
             .thread_keep_alive(tokio::time::Duration::from_secs(30))
+            .max_blocking_threads(4096)
             .build()
             .unwrap();
         let plugin = Arc::new(SmartdnsPlugin {
