@@ -1,4 +1,4 @@
-name: Docker Image CI with ui
+name: Docker Image Canary
 on:
   workflow_dispatch:
   push:
@@ -172,82 +172,6 @@ jobs:
           else
             docker buildx build --no-cache --platform linux/$GOARCH --push -t pikuzheng/smartdns:ui-$GOARCH-canary -f Dockerfile.unknown .
           fi
-      - name: rebuild-smartdns-without-jemalloc
-        run: |
-          cd ${{ github.workspace }}
-          rm ${{ github.workspace }}/build/* || true
-          mkdir -p ${{ github.workspace }}/build || true
-          rm docker-openssl.sh || true
-          cat >> docker-openssl.sh << EOF
-          apk add perl make coreutils tar pkgconfig dpkg binutils
-          cd /workdir
-          export CFLAGS="-I /workdir/openssl/include -Wno-error=date-time -I/workdir/zlib -DWITH_ZLIB"
-          export LDFLAGS="-L /workdir/openssl -L /workdir/zlib -lz"
-          ./package/build-pkg.sh --platform linux --arch all --filearch $GOARCH-linux --outputdir /workdir/build
-          EOF
-          if  test "$GOARCH" = "armv7" ;then
-            docker run -i --rm -v ${{ github.workspace }}:/workdir muslcc/x86_64:armv7l-linux-musleabihf sh /workdir/docker-openssl.sh
-          else
-            docker run -i --rm -v ${{ github.workspace }}:/workdir muslcc/x86_64:$GOARCH-linux-musl sh /workdir/docker-openssl.sh
-          fi
-      - name: release ipk
-        run: |
-          cd ${{ github.workspace }}/package/openwrt
-          chmod +x make_openwrt_withui.sh
-          docker run -i --rm -v ${{ github.workspace }}:/workdir alpine:3 sh -c "apk update && apk add tar && /workdir/package/openwrt/make_openwrt_withui.sh -o /workdir/build --arch all --filearch $GOARCH --ver ${{needs.get-version.outputs.CUR_VERSION}}"
-      - name: release deb
-        run: |
-          cd ${{ github.workspace }}/package/debian
-          rm make.sh || true
-          mkdir usr/sbin -p
-          cp ${{ github.workspace }}/src/smartdns usr/sbin/
-          chmod +x usr/sbin/smartdns || true
-          mkdir etc/smartdns -p
-          cp ${{ github.workspace }}/etc/smartdns/smartdns.conf ./etc/smartdns/
-          mkdir etc/default -p
-          cp ${{ github.workspace }}/etc/default/smartdns ./etc/default/
-          echo 'LD_LIBRARY_PATH=/usr/local/lib/smartdns:/usr/lib:/lib' >> ./etc/default/smartdns
-          mkdir lib/systemd/system -p
-          cp ${{ github.workspace }}/systemd/smartdns.service ./lib/systemd/system/
-          mkdir usr/local/lib/smartdns -p
-          cp ${{ github.workspace }}/openssl/libcrypto.so ./usr/local/lib/smartdns/libcrypto.so.3
-          cp ${{ github.workspace }}/openssl/libssl.so ./usr/local/lib/smartdns/libssl.so.3
-          cp ${{ github.workspace }}/libz.so.1 ./usr/local/lib/smartdns/libz.so.1
-          cp ${{ github.workspace }}/plugin/smartdns-ui/libgcc_s.so.1 ./usr/local/lib/smartdns/libgcc_s.so.1
-          cp ${{ github.workspace }}/plugin/smartdns-ui/libsmartdns_ui.so ./usr/local/lib/smartdns/smartdns_ui.so
-          mkdir usr/share/smartdns/wwwroot -p
-          cp -a ${{ github.workspace }}/smartdns-webui/out/* ./usr/share/smartdns/wwwroot/
-          sed -i "s/Version:.*/Version: ${{needs.get-version.outputs.CUR_VERSION}}/" ./DEBIAN/control
-          sed -i "s/Architecture:.*/Architecture: all/" ./DEBIAN/control
-          sed -i '/^Depends:/ {s/$/, musl/;b}; /^Package:/a Depends: musl' ./DEBIAN/control
-          chmod 0755 ./DEBIAN/prerm || true
-          dpkg-deb -Zgzip -b ${{ github.workspace }}/package/debian ${{ github.workspace }}/build/smartdns_with_ui.${{needs.get-version.outputs.CUR_VERSION}}.$GOARCH.deb
-      - name: release ipk with edns
-        run: |
-          cd ${{ github.workspace }}
-          rm docker-openssl.sh || true
-          cat >> docker-openssl.sh << EOF
-          apk add perl make coreutils tar pkgconfig dpkg binutils
-          cd /workdir
-          export CFLAGS="-I /workdir/openssl/include -DFEATURE_CHECK_EDNS"
-          export LDFLAGS="-L /workdir/openssl"
-          ./package/build-pkg.sh --platform linux --arch all --filearch $GOARCH-linux-edns --outputdir /workdir/build
-          EOF
-          if  test "$GOARCH" = "armv7" ;then
-            docker run -i --rm -v ${{ github.workspace }}:/workdir muslcc/x86_64:armv7l-linux-musleabihf sh /workdir/docker-openssl.sh
-          else
-            docker run -i --rm -v ${{ github.workspace }}:/workdir muslcc/x86_64:$GOARCH-linux-musl sh /workdir/docker-openssl.sh
-          fi
-          cd ${{ github.workspace }}/package/openwrt
-          chmod +x make_openwrt_withui.sh
-          ./make_openwrt_withui.sh -o ${{ github.workspace }}/build --arch all --filearch $GOARCH-edns --ver ${{needs.get-version.outputs.CUR_VERSION}}
-      - name: release deb with edns
-        run: |
-          cd ${{ github.workspace }}/package/debian
-          rm usr/sbin/smartdns || true
-          cp ${{ github.workspace }}/src/smartdns usr/sbin/
-          chmod +x usr/sbin/smartdns || true
-          dpkg-deb -Zgzip -b ${{ github.workspace }}/package/debian ${{ github.workspace }}/build/smartdns_with_ui.${{needs.get-version.outputs.CUR_VERSION}}.$GOARCH-edns.deb
       - name: general tag and release ipk
         id: tag
         run: |
