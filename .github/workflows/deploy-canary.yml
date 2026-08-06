@@ -204,6 +204,6 @@ jobs:
       - name: create manifest
         run: |
           docker login --username=${{ secrets.DOCKER_USERNAME }} --password='${{ secrets.DOCKER_PASSWORD }}' && \
-          docker buildx imagetools create -t pikuzheng/smartdns:ui -t pikuzheng/smartdns:ui-${{needs.get-version.outputs.CUR_VERSION}} -t pikuzheng/smartdns:canary -t pikuzheng/smartdns:${{needs.get-version.outputs.CUR_VERSION}} pikuzheng/smartdns:ui-x86_64-canary pikuzheng/smartdns:ui-aarch64-canary pikuzheng/smartdns:ui-armv7-canary
+          docker buildx imagetools create  -t pikuzheng/smartdns:canary pikuzheng/smartdns:ui-x86_64-canary pikuzheng/smartdns:ui-aarch64-canary pikuzheng/smartdns:ui-armv7-canary
           docker login ccr.ccs.tencentyun.com --username=${{ secrets.CCR_USERNAME }} --password='${{ secrets.CCR_PASSWORD }}' && \
-          docker buildx imagetools create -t pikuzheng/smartdns:ui -t pikuzheng/smartdns:ui-${{needs.get-version.outputs.CUR_VERSION}} -t pikuzheng/smartdns:canary -t pikuzheng/smartdns:${{needs.get-version.outputs.CUR_VERSION}} pikuzheng/smartdns:ui-x86_64-canary pikuzheng/smartdns:ui-aarch64-canary pikuzheng/smartdns:ui-armv7-canary || true
+          docker buildx imagetools create  -t pikuzheng/smartdns:canary pikuzheng/smartdns:ui-x86_64-canary pikuzheng/smartdns:ui-aarch64-canary pikuzheng/smartdns:ui-armv7-canary || true
