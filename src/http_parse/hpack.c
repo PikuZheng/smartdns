@@ -1,4 +1,5 @@
 #include "hpack.h"
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -79,34 +80,44 @@ static const struct hpack_static_entry hpack_static_table[] = {
 
 /* HPACK integer encoding/decoding */
 
-static int hpack_encode_integer(uint64_t value, int prefix_bits, uint8_t *buf, int buf_size)
+static int hpack_encode_integer(uint64_t value, int prefix_bits, uint8_t *buf, size_t buf_size)
 {
-	int max_prefix = (1 << prefix_bits) - 1;
+	unsigned int max_prefix;
 	int offset = 0;
 
-	if (value < (uint64_t)max_prefix) {
+	/* prefix_bits must be in range [1, 8] */
+	if (prefix_bits < 1 || prefix_bits > 8) {
+		return -1;
+	}
+
+	max_prefix = (1U << prefix_bits) - 1;
+
+	if (value < max_prefix) {
 		if (buf_size < 1) {
 			return -1;
 		}
-		buf[0] |= (uint8_t)value;
+		/* Only modify the lower prefix_bits of buf[0]; high bits are
+		 * preserved as provided by the caller. */
+		buf[0] = (buf[0] & ~((uint8_t)max_prefix)) | (uint8_t)value;
 		return 1;
 	}
 
 	if (buf_size < 1) {
 		return -1;
 	}
-	buf[offset++] |= (uint8_t)max_prefix;
+	buf[0] = (buf[0] & ~((uint8_t)max_prefix)) | (uint8_t)max_prefix;
+	offset = 1;
 	value -= max_prefix;
 
 	while (value >= 128) {
-		if (offset >= buf_size) {
+		if ((size_t)offset >= buf_size) {
 			return -1;
 		}
 		buf[offset++] = (uint8_t)((value & 0x7F) | 0x80);
 		value >>= 7;
 	}
 
-	if (offset >= buf_size) {
+	if ((size_t)offset >= buf_size) {
 		return -1;
 	}
 	buf[offset++] = (uint8_t)value;
@@ -115,24 +126,38 @@ static int hpack_encode_integer(uint64_t value, int prefix_bits, uint8_t *buf, i
 
 static int hpack_decode_integer(const uint8_t *data, int data_len, int prefix_bits, uint64_t *value)
 {
-	int max_prefix = (1 << prefix_bits) - 1;
+	unsigned int max_prefix;
 	int offset = 0;
 	uint64_t result;
 	int shift = 0;
+
+	if (prefix_bits < 1 || prefix_bits > 8) {
+		return -1;
+	}
+
+	max_prefix = (1U << prefix_bits) - 1;
 
 	if (data_len < 1) {
 		return -1;
 	}
 
 	result = data[offset++] & max_prefix;
-	if (result < (uint64_t)max_prefix) {
+	if (result < max_prefix) {
 		*value = result;
 		return offset;
 	}
 
 	while (offset < data_len) {
 		uint8_t byte = data[offset++];
-		result += (uint64_t)(byte & 0x7F) << shift;
+		uint64_t incr = (uint64_t)(byte & 0x7F);
+		/* Check for uint64_t overflow before shifting / adding */
+		if (shift > 0 && incr > (UINT64_MAX >> shift)) {
+			return -1;
+		}
+		if (result > UINT64_MAX - (incr << shift)) {
+			return -1;
+		}
+		result += incr << shift;
 		shift += 7;
 		if ((byte & 0x80) == 0) {
 			*value = result;
@@ -148,10 +173,10 @@ static int hpack_decode_integer(const uint8_t *data, int data_len, int prefix_bi
 
 /* HPACK string encoding/decoding */
 
-static int hpack_encode_string(const char *str, uint8_t *buf, int buf_size)
+static int hpack_encode_string(const char *str, uint8_t *buf, size_t buf_size)
 {
-	int len = strlen(str);
-	int offset = 0;
+	size_t len = strlen(str);
+	size_t offset = 0;
 	int ret;
 
 	if (buf_size < 1) {
@@ -163,7 +188,7 @@ static int hpack_encode_string(const char *str, uint8_t *buf, int buf_size)
 	if (ret < 0) {
 		return -1;
 	}
-	offset += ret;
+	offset += (size_t)ret;
 
 	if (offset + len > buf_size) {
 		return -1;
@@ -172,7 +197,7 @@ static int hpack_encode_string(const char *str, uint8_t *buf, int buf_size)
 	memcpy(buf + offset, str, len);
 	offset += len;
 
-	return offset;
+	return (int)offset;
 }
 
 /* HPACK Huffman decoding table based on RFC 7541 Appendix B */
@@ -184,197 +209,105 @@ struct huffman_decode_entry {
 };
 
 /* Complete Huffman decoding table for HPACK (RFC 7541 Appendix B) */
-/* Sorted by code for binary search */
+/* Codes are right-aligned (LSB-aligned) as specified in RFC 7541 */
+/* Sorted by symbol index for binary search within each length group */
 static const struct huffman_decode_entry huffman_table[] = {
-	/* 5-bit codes */
-	{0x00, 5, '0'},
-	{0x01, 5, '1'},
-	{0x02, 5, '2'},
-	{0x03, 5, 'a'},
-	{0x04, 5, 'c'},
-	{0x05, 5, 'e'},
-	{0x06, 5, 'i'},
-	{0x07, 5, 'o'},
-	{0x08, 5, 's'},
-	{0x09, 5, 't'},
-
-	/* 6-bit codes */
-	{0x14, 6, ' '},
-	{0x15, 6, '%'},
-	{0x16, 6, '-'},
-	{0x17, 6, '.'},
-	{0x18, 6, '/'},
-	{0x19, 6, '3'},
-	{0x1a, 6, '4'},
-	{0x1b, 6, '5'},
-	{0x1c, 6, '6'},
-	{0x1d, 6, '7'},
-	{0x1e, 6, '8'},
-	{0x1f, 6, '9'},
-	{0x20, 6, '='},
-	{0x21, 6, 'A'},
-	{0x22, 6, '_'},
-	{0x23, 6, 'b'},
-	{0x24, 6, 'd'},
-	{0x25, 6, 'f'},
-	{0x26, 6, 'g'},
-	{0x27, 6, 'h'},
-	{0x28, 6, 'l'},
-	{0x29, 6, 'm'},
-	{0x2a, 6, 'n'},
-	{0x2b, 6, 'p'},
-	{0x2c, 6, 'r'},
-	{0x2d, 6, 'u'},
-
-	/* 7-bit codes */
-	{0x5c, 7, ':'},
-	{0x5d, 7, 'B'},
-	{0x5e, 7, 'C'},
-	{0x5f, 7, 'D'},
-	{0x60, 7, 'E'},
-	{0x61, 7, 'F'},
-	{0x62, 7, 'G'},
-	{0x63, 7, 'H'},
-	{0x64, 7, 'I'},
-	{0x65, 7, 'J'},
-	{0x66, 7, 'K'},
-	{0x67, 7, 'L'},
-	{0x68, 7, 'M'},
-	{0x69, 7, 'N'},
-	{0x6a, 7, 'O'},
-	{0x6b, 7, 'P'},
-	{0x6c, 7, 'Q'},
-	{0x6d, 7, 'R'},
-	{0x6e, 7, 'S'},
-	{0x6f, 7, 'T'},
-	{0x70, 7, 'U'},
-	{0x71, 7, 'V'},
-	{0x72, 7, 'W'},
-	{0x73, 7, 'Y'},
-	{0x74, 7, 'j'},
-	{0x75, 7, 'k'},
-	{0x76, 7, 'q'},
-	{0x77, 7, 'v'},
-	{0x78, 7, 'w'},
-	{0x79, 7, 'x'},
-	{0x7a, 7, 'y'},
-	{0x7b, 7, 'z'},
-
-	/* 8-bit codes */
-	{0xf8, 8, '&'},
-	{0xf9, 8, '*'},
-	{0xfa, 8, ','},
-	{0xfb, 8, ';'},
-	{0xfc, 8, 'X'},
-	{0xfd, 8, 'Z'},
-
-	/* 10-bit codes */
-	{0x3f8, 10, '!'},
-	{0x3f9, 10, '"'},
-	{0x3fa, 10, '('},
-	{0x3fb, 10, ')'},
-	{0x3fc, 10, '?'},
-
-	/* 11-bit codes */
-	{0x7fa, 11, '#'},
-	{0x7fb, 11, '>'},
-
-	/* 12-bit codes */
-	{0xffa, 12, '$'},
-	{0xffb, 12, '@'},
-	{0xffc, 12, '['},
-	{0xffd, 12, ']'},
-	{0xffe, 12, '~'},
-
-	/* 13-bit codes */
-	{0x1ff8, 13, '+'},
-	{0x1ff9, 13, '<'},
-	{0x1ffa, 13, '\\'},
-
-	/* 14-bit codes */
-	{0x3ffc, 14, '\''},
-	{0x3ffd, 14, '|'},
-
-	/* 15-bit codes */
-	{0x7ffc, 15, '`'},
-	{0x7ffd, 15, '{'},
-
-	/* 19-bit codes */
-	{0x7fff0, 19, '}'},
-
-	/* 20-bit codes and above - less common characters */
-	{0xffff8, 20, 0x00},
-	{0xffff9, 20, 0x01},
-	{0xffffa, 20, 0x02},
-	{0xffffb, 20, 0x03},
-	{0xffffc, 20, 0x04},
-	{0xffffd, 20, 0x05},
-	{0xffffe, 20, 0x06},
-	{0xfffff, 20, 0x07},
-	{0x1ffff8, 21, 0x08},
-	{0x1ffff9, 21, 0x09},
-	{0x1ffffa, 21, 0x0a},
-	{0x1ffffb, 21, 0x0b},
-	{0x1ffffc, 21, 0x0c},
-	{0x1ffffd, 21, 0x0d},
-	{0x1ffffe, 21, 0x0e},
-	{0x1fffff, 21, 0x0f},
-	{0x3ffff8, 22, 0x10},
-	{0x3ffff9, 22, 0x11},
-	{0x3ffffa, 22, 0x12},
-	{0x3ffffb, 22, 0x13},
-	{0x3ffffc, 22, 0x14},
-	{0x3ffffd, 22, 0x15},
-	{0x3ffffe, 22, 0x16},
-	{0x3fffff, 22, 0x17},
-	{0x7ffff8, 23, 0x18},
-	{0x7ffff9, 23, 0x19},
-	{0x7ffffa, 23, 0x1a},
-	{0x7ffffb, 23, 0x1b},
-	{0x7ffffc, 23, 0x1c},
-	{0x7ffffd, 23, 0x1d},
-	{0x7ffffe, 23, 0x1e},
-	{0x7fffff, 23, 0x1f},
-	{0xfffff8, 24, 0x7f},
-	{0xfffff9, 24, 0x20},
-	{0xfffffa, 24, 0x21},
-	{0xfffffb, 24, 0x22},
-	{0xfffffc, 24, 0x23},
-	{0xfffffd, 24, 0x24},
-	{0xfffffe, 24, 0x25},
-	{0xffffff, 24, 0x26},
-	{0x1fffff8, 25, 0x27},
-	{0x1fffff9, 25, 0x28},
-	{0x1fffffa, 25, 0x29},
-	{0x1fffffb, 25, 0x2a},
-	{0x1fffffc, 25, 0x2b},
-	{0x1fffffd, 25, 0x2c},
-	{0x1fffffe, 25, 0x2d},
-	{0x1ffffff, 25, 0x2e},
-	{0x3fffff8, 26, 0x2f},
-	{0x3fffff9, 26, 0x30},
-	{0x3fffffa, 26, 0x31},
-	{0x3fffffb, 26, 0x32},
-	{0x3fffffc, 26, 0x33},
-	{0x3fffffd, 26, 0x34},
-	{0x3fffffe, 26, 0x35},
-	{0x3ffffff, 26, 0x36},
-	{0x7fffff8, 27, 0x37},
-	{0x7fffff9, 27, 0x38},
-	{0x7fffffa, 27, 0x39},
-	{0x7fffffb, 27, 0x3a},
-	{0x7fffffc, 27, 0x3b},
-	{0x7fffffd, 27, 0x3c},
-	{0x7fffffe, 27, 0x3d},
-	{0x7ffffff, 27, 0x3e},
-	{0xffffff8, 28, 0x3f},
-	{0xffffff9, 28, 0x40},
-	{0xffffffa, 28, 0x41},
-	{0xffffffb, 28, 0x42},
-	{0xffffffc, 28, 0x43},
-	{0xffffffd, 28, 0x44},
-	{0xffffffe, 28, 0x45},
-	{0xfffffff, 28, 0x46},
+	/*   0 -  31: control characters (0x00 - 0x1f) */
+	{0x00001ff8, 13, 0x00}, {0x007fffd8, 23, 0x01}, {0x0fffffe2, 28, 0x02},
+	{0x0fffffe3, 28, 0x03}, {0x0fffffe4, 28, 0x04}, {0x0fffffe5, 28, 0x05},
+	{0x0fffffe6, 28, 0x06}, {0x0fffffe7, 28, 0x07}, {0x0fffffe8, 28, 0x08},
+	{0x000ffffea, 24, 0x09}, {0x3ffffffc, 30, 0x0a}, {0x0fffffe9, 28, 0x0b},
+	{0x0fffffea, 28, 0x0c}, {0x3ffffffd, 30, 0x0d}, {0x0fffffeb, 28, 0x0e},
+	{0x0fffffec, 28, 0x0f}, {0x0fffffed, 28, 0x10}, {0x0fffffee, 28, 0x11},
+	{0x0fffffef, 28, 0x12}, {0x0ffffff0, 28, 0x13}, {0x0ffffff1, 28, 0x14},
+	{0x0ffffff2, 28, 0x15}, {0x3ffffffe, 30, 0x16}, {0x0ffffff3, 28, 0x17},
+	{0x0ffffff4, 28, 0x18}, {0x0ffffff5, 28, 0x19}, {0x0ffffff6, 28, 0x1a},
+	{0x0ffffff7, 28, 0x1b}, {0x0ffffff8, 28, 0x1c}, {0x0ffffff9, 28, 0x1d},
+	{0x0ffffffa, 28, 0x1e}, {0x0ffffffb, 28, 0x1f},
+	/*  32 -  63: printable punctuation and digits */
+	{0x00000014,  6, ' '},  {0x000003f8, 10, '!'},  {0x000003f9, 10, '"'},
+	{0x00000ffa, 12, '#'},  {0x00001ff9, 13, '$'},  {0x00000015,  6, '%'},
+	{0x000000f8,  8, '&'},  {0x000007fa, 11, '\''}, {0x000003fa, 10, '('},
+	{0x000003fb, 10, ')'},  {0x000000f9,  8, '*'},  {0x000007fb, 11, '+'},
+	{0x000000fa,  8, ','},  {0x00000016,  6, '-'},  {0x00000017,  6, '.'},
+	{0x00000018,  6, '/'},  {0x00000000,  5, '0'},  {0x00000001,  5, '1'},
+	{0x00000002,  5, '2'},  {0x00000019,  6, '3'},  {0x0000001a,  6, '4'},
+	{0x0000001b,  6, '5'},  {0x0000001c,  6, '6'},  {0x0000001d,  6, '7'},
+	{0x0000001e,  6, '8'},  {0x0000001f,  6, '9'},  {0x0000005c,  7, ':'},
+	{0x000000fb,  8, ';'},  {0x00007ffc, 15, '<'},  {0x00000020,  6, '='},
+	{0x00000ffb, 12, '>'},  {0x000003fc, 10, '?'},
+	/*  64 -  95: uppercase letters and more */
+	{0x00001ffa, 13, '@'},  {0x00000021,  6, 'A'},  {0x0000005d,  7, 'B'},
+	{0x0000005e,  7, 'C'},  {0x0000005f,  7, 'D'},  {0x00000060,  7, 'E'},
+	{0x00000061,  7, 'F'},  {0x00000062,  7, 'G'},  {0x00000063,  7, 'H'},
+	{0x00000064,  7, 'I'},  {0x00000065,  7, 'J'},  {0x00000066,  7, 'K'},
+	{0x00000067,  7, 'L'},  {0x00000068,  7, 'M'},  {0x00000069,  7, 'N'},
+	{0x0000006a,  7, 'O'},  {0x0000006b,  7, 'P'},  {0x0000006c,  7, 'Q'},
+	{0x0000006d,  7, 'R'},  {0x0000006e,  7, 'S'},  {0x0000006f,  7, 'T'},
+	{0x00000070,  7, 'U'},  {0x00000071,  7, 'V'},  {0x00000072,  7, 'W'},
+	{0x000000fc,  8, 'X'},  {0x00000073,  7, 'Y'},  {0x000000fd,  8, 'Z'},
+	{0x00001ffb, 13, '['},  {0x0007fff0, 19, '\\'}, {0x00001ffc, 13, ']'},
+	{0x00003ffc, 14, '^'},  {0x00000022,  6, '_'},
+	/*  96 - 127: lowercase letters, backtick, braces, pipe, tilde, DEL */
+	{0x00007ffd, 15, '`'},  {0x00000003,  5, 'a'},  {0x00000023,  6, 'b'},
+	{0x00000004,  5, 'c'},  {0x00000024,  6, 'd'},  {0x00000005,  5, 'e'},
+	{0x00000025,  6, 'f'},  {0x00000026,  6, 'g'},  {0x00000027,  6, 'h'},
+	{0x00000006,  5, 'i'},  {0x00000074,  7, 'j'},  {0x00000075,  7, 'k'},
+	{0x00000028,  6, 'l'},  {0x00000029,  6, 'm'},  {0x0000002a,  6, 'n'},
+	{0x00000007,  5, 'o'},  {0x0000002b,  6, 'p'},  {0x00000076,  7, 'q'},
+	{0x0000002c,  6, 'r'},  {0x00000008,  5, 's'},  {0x00000009,  5, 't'},
+	{0x0000002d,  6, 'u'},  {0x00000077,  7, 'v'},  {0x00000078,  7, 'w'},
+	{0x00000079,  7, 'x'},  {0x0000007a,  7, 'y'},  {0x0000007b,  7, 'z'},
+	{0x00007ffe, 15, '{'},  {0x000007fc, 11, '|'},  {0x00003ffd, 14, '}'},
+	{0x00001ffd, 13, '~'},  {0x0ffffffc, 28, 0x7f},
+	/* 128 - 159: extended ASCII */
+	{0x000fffe6, 20, 0x80}, {0x03fffd2, 22, 0x81}, {0x000fffe7, 20, 0x82},
+	{0x000fffe8, 20, 0x83}, {0x03fffd3, 22, 0x84}, {0x03fffd4, 22, 0x85},
+	{0x03fffd5, 22, 0x86}, {0x07fffd9, 23, 0x87}, {0x03fffd6, 22, 0x88},
+	{0x07fffda, 23, 0x89}, {0x07fffdb, 23, 0x8a}, {0x07fffdc, 23, 0x8b},
+	{0x07fffdd, 23, 0x8c}, {0x07fffde, 23, 0x8d}, {0x0ffffeb, 24, 0x8e},
+	{0x07fffdf, 23, 0x8f}, {0x0ffffec, 24, 0x90}, {0x0ffffed, 24, 0x91},
+	{0x03fffd7, 22, 0x92}, {0x07fffe0, 23, 0x93}, {0x0ffffee, 24, 0x94},
+	{0x07fffe1, 23, 0x95}, {0x07fffe2, 23, 0x96}, {0x07fffe3, 23, 0x97},
+	{0x07fffe4, 23, 0x98}, {0x01fffdc, 21, 0x99}, {0x03fffd8, 22, 0x9a},
+	{0x07fffe5, 23, 0x9b}, {0x03fffd9, 22, 0x9c}, {0x07fffe6, 23, 0x9d},
+	{0x07fffe7, 23, 0x9e}, {0x0ffffef, 24, 0x9f},
+	/* 160 - 191 */
+	{0x03fffda, 22, 0xa0}, {0x01fffdd, 21, 0xa1}, {0x000fffe9, 20, 0xa2},
+	{0x03fffdb, 22, 0xa3}, {0x03fffdc, 22, 0xa4}, {0x07fffe8, 23, 0xa5},
+	{0x07fffe9, 23, 0xa6}, {0x01fffde, 21, 0xa7}, {0x07fffea, 23, 0xa8},
+	{0x03fffdd, 22, 0xa9}, {0x03fffde, 22, 0xaa}, {0x0fffff0, 24, 0xab},
+	{0x01fffdf, 21, 0xac}, {0x03fffdf, 22, 0xad}, {0x07fffeb, 23, 0xae},
+	{0x07fffec, 23, 0xaf}, {0x01fffe0, 21, 0xb0}, {0x01fffe1, 21, 0xb1},
+	{0x03fffe0, 22, 0xb2}, {0x01fffe2, 21, 0xb3}, {0x07fffed, 23, 0xb4},
+	{0x03fffe1, 22, 0xb5}, {0x07fffee, 23, 0xb6}, {0x07fffef, 23, 0xb7},
+	{0x000fffea, 20, 0xb8}, {0x03fffe2, 22, 0xb9}, {0x03fffe3, 22, 0xba},
+	{0x03fffe4, 22, 0xbb}, {0x07ffff0, 23, 0xbc}, {0x03fffe5, 22, 0xbd},
+	{0x03fffe6, 22, 0xbe}, {0x07ffff1, 23, 0xbf},
+	/* 192 - 223 */
+	{0x03ffffe0, 26, 0xc0}, {0x03ffffe1, 26, 0xc1}, {0x000fffeb, 20, 0xc2},
+	{0x0007fff1, 19, 0xc3}, {0x03fffe7, 22, 0xc4}, {0x07ffff2, 23, 0xc5},
+	{0x03fffe8, 22, 0xc6}, {0x01ffffec, 25, 0xc7}, {0x03ffffe2, 26, 0xc8},
+	{0x03ffffe3, 26, 0xc9}, {0x03ffffe4, 26, 0xca}, {0x07ffffde, 27, 0xcb},
+	{0x07ffffdf, 27, 0xcc}, {0x03ffffe5, 26, 0xcd}, {0x0fffff1, 24, 0xce},
+	{0x01ffffed, 25, 0xcf}, {0x0007fff2, 19, 0xd0}, {0x01fffe3, 21, 0xd1},
+	{0x03ffffe6, 26, 0xd2}, {0x07ffffe0, 27, 0xd3}, {0x07ffffe1, 27, 0xd4},
+	{0x03ffffe7, 26, 0xd5}, {0x07ffffe2, 27, 0xd6}, {0x0fffff2, 24, 0xd7},
+	{0x01fffe4, 21, 0xd8}, {0x01fffe5, 21, 0xd9}, {0x03ffffe8, 26, 0xda},
+	{0x03ffffe9, 26, 0xdb}, {0x0ffffffd, 28, 0xdc}, {0x07ffffe3, 27, 0xdd},
+	{0x07ffffe4, 27, 0xde}, {0x07ffffe5, 27, 0xdf},
+	/* 224 - 255 */
+	{0x000fffec, 20, 0xe0}, {0x0fffff3, 24, 0xe1}, {0x000fffed, 20, 0xe2},
+	{0x01fffe6, 21, 0xe3}, {0x03fffe9, 22, 0xe4}, {0x01fffe7, 21, 0xe5},
+	{0x01fffe8, 21, 0xe6}, {0x07ffff3, 23, 0xe7}, {0x03fffea, 22, 0xe8},
+	{0x03fffeb, 22, 0xe9}, {0x01ffffee, 25, 0xea}, {0x01ffffef, 25, 0xeb},
+	{0x0fffff4, 24, 0xec}, {0x0fffff5, 24, 0xed}, {0x03ffffea, 26, 0xee},
+	{0x07ffff4, 23, 0xef}, {0x03ffffeb, 26, 0xf0}, {0x07ffffe6, 27, 0xf1},
+	{0x03ffffec, 26, 0xf2}, {0x03ffffed, 26, 0xf3}, {0x07ffffe7, 27, 0xf4},
+	{0x07ffffe8, 27, 0xf5}, {0x07ffffe9, 27, 0xf6}, {0x07ffffea, 27, 0xf7},
+	{0x07ffffeb, 27, 0xf8}, {0x0ffffffe, 28, 0xf9}, {0x07ffffec, 27, 0xfa},
+	{0x07ffffed, 27, 0xfb}, {0x07ffffee, 27, 0xfc}, {0x07ffffef, 27, 0xfd},
+	{0x07fffff0, 27, 0xfe}, {0x03ffffee, 26, 0xff},
 };
 
 #define HUFFMAN_TABLE_SIZE (sizeof(huffman_table) / sizeof(huffman_table[0]))
@@ -680,7 +613,7 @@ int hpack_encode_header(struct hpack_context *hpack, const char *name, const cha
 			return -1;
 		}
 		buf[offset] = 0x80;
-		ret = hpack_encode_integer(index, 7, buf + offset, buf_size - offset);
+		ret = hpack_encode_integer(index, 7, buf + offset, (size_t)(buf_size - offset));
 		if (ret < 0) {
 			return -1;
 		}
@@ -693,13 +626,13 @@ int hpack_encode_header(struct hpack_context *hpack, const char *name, const cha
 			return -1;
 		}
 		buf[offset] = 0x40;
-		ret = hpack_encode_integer(name_only_index, 6, buf + offset, buf_size - offset);
+		ret = hpack_encode_integer(name_only_index, 6, buf + offset, (size_t)(buf_size - offset));
 		if (ret < 0) {
 			return -1;
 		}
 		offset += ret;
 
-		ret = hpack_encode_string(value, buf + offset, buf_size - offset);
+		ret = hpack_encode_string(value, buf + offset, (size_t)(buf_size - offset));
 		if (ret < 0) {
 			return -1;
 		}
@@ -715,13 +648,13 @@ int hpack_encode_header(struct hpack_context *hpack, const char *name, const cha
 	}
 	buf[offset++] = 0x40;
 
-	ret = hpack_encode_string(name, buf + offset, buf_size - offset);
+	ret = hpack_encode_string(name, buf + offset, (size_t)(buf_size - offset));
 	if (ret < 0) {
 		return -1;
 	}
 	offset += ret;
 
-	ret = hpack_encode_string(value, buf + offset, buf_size - offset);
+	ret = hpack_encode_string(value, buf + offset, (size_t)(buf_size - offset));
 	if (ret < 0) {
 		return -1;
 	}
