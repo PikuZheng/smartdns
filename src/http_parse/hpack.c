@@ -124,34 +124,35 @@ static int hpack_encode_integer(uint64_t value, int prefix_bits, uint8_t *buf, s
 	return offset;
 }
 
-static int hpack_decode_integer(const uint8_t *data, int data_len, int prefix_bits, uint64_t *value)
+static int hpack_decode_integer(const uint8_t *data, size_t data_len, unsigned int prefix_bits, uint64_t *value)
 {
 	unsigned int max_prefix;
-	int offset = 0;
+	size_t offset = 0;
 	uint64_t result;
-	int shift = 0;
+	unsigned int shift = 0;
 
 	if (prefix_bits < 1 || prefix_bits > 8) {
 		return -1;
 	}
 
-	max_prefix = (1U << prefix_bits) - 1;
-
 	if (data_len < 1) {
 		return -1;
 	}
 
+	max_prefix = (1U << prefix_bits) - 1;
+
 	result = data[offset++] & max_prefix;
 	if (result < max_prefix) {
 		*value = result;
-		return offset;
+		return (int)offset;
 	}
 
 	while (offset < data_len) {
 		uint8_t byte = data[offset++];
 		uint64_t incr = (uint64_t)(byte & 0x7F);
-		/* Check for uint64_t overflow before shifting / adding */
-		if (shift > 0 && incr > (UINT64_MAX >> shift)) {
+		/* Check for uint64_t overflow before shifting / adding.
+		 * incr << shift must not overflow; result + (incr << shift) must not overflow. */
+		if (incr > (UINT64_MAX >> shift)) {
 			return -1;
 		}
 		if (result > UINT64_MAX - (incr << shift)) {
@@ -161,7 +162,7 @@ static int hpack_decode_integer(const uint8_t *data, int data_len, int prefix_bi
 		shift += 7;
 		if ((byte & 0x80) == 0) {
 			*value = result;
-			return offset;
+			return (int)offset;
 		}
 		if (shift > 63) {
 			return -1;
@@ -376,11 +377,11 @@ static int hpack_decode_huffman(const uint8_t *src, size_t src_len, uint8_t *dst
 	return dst_pos;
 }
 
-static int hpack_decode_string(const uint8_t *data, int data_len, char **str)
+static int hpack_decode_string(const uint8_t *data, size_t data_len, char **str)
 {
 	uint64_t len;
 	int huffman;
-	int offset = 0;
+	size_t offset = 0;
 	int ret;
 
 	if (data_len < 1) {
@@ -392,9 +393,9 @@ static int hpack_decode_string(const uint8_t *data, int data_len, char **str)
 	if (ret < 0) {
 		return -1;
 	}
-	offset += ret;
+	offset += (size_t)ret;
 
-	if (offset + (int)len > data_len) {
+	if (offset + len > data_len) {
 		return -1;
 	}
 
@@ -710,7 +711,7 @@ int hpack_decode_headers(struct hpack_context *hpack, const uint8_t *data, int d
 			/* Indexed header field */
 			uint64_t index;
 			const char *static_name, *static_value;
-			int ret = hpack_decode_integer(data + offset, data_len - offset, 7, &index);
+			int ret = hpack_decode_integer(data + offset, (size_t)(data_len - offset), 7, &index);
 			if (ret < 0) {
 				return -1;
 			}
@@ -725,7 +726,7 @@ int hpack_decode_headers(struct hpack_context *hpack, const uint8_t *data, int d
 		} else if ((data[offset] & 0x40) != 0) {
 			/* Literal with incremental indexing */
 			uint64_t index;
-			int ret = hpack_decode_integer(data + offset, data_len - offset, 6, &index);
+			int ret = hpack_decode_integer(data + offset, (size_t)(data_len - offset), 6, &index);
 			if (ret < 0) {
 				return -1;
 			}
@@ -745,7 +746,7 @@ int hpack_decode_headers(struct hpack_context *hpack, const uint8_t *data, int d
 					name = allocated_name;
 				}
 			} else {
-				ret = hpack_decode_string(data + offset, data_len - offset, &allocated_name);
+				ret = hpack_decode_string(data + offset, (size_t)(data_len - offset), &allocated_name);
 				if (ret < 0) {
 					return -1;
 				}
@@ -753,7 +754,7 @@ int hpack_decode_headers(struct hpack_context *hpack, const uint8_t *data, int d
 				name = allocated_name;
 			}
 
-			ret = hpack_decode_string(data + offset, data_len - offset, &allocated_value);
+			ret = hpack_decode_string(data + offset, (size_t)(data_len - offset), &allocated_value);
 			if (ret < 0) {
 				free(allocated_name);
 				return -1;
@@ -771,7 +772,7 @@ int hpack_decode_headers(struct hpack_context *hpack, const uint8_t *data, int d
 			if (header_field_seen) {
 				return -1;
 			}
-			int ret = hpack_decode_integer(data + offset, data_len - offset, 5, &new_size);
+			int ret = hpack_decode_integer(data + offset, (size_t)(data_len - offset), 5, &new_size);
 			if (ret < 0) {
 				return -1;
 			}
@@ -781,8 +782,7 @@ int hpack_decode_headers(struct hpack_context *hpack, const uint8_t *data, int d
 		} else {
 			/* Literal without indexing or never indexed */
 			uint64_t index;
-			int prefix = 4; /* Both types use 4-bit prefix */
-			int ret = hpack_decode_integer(data + offset, data_len - offset, prefix, &index);
+			int ret = hpack_decode_integer(data + offset, (size_t)(data_len - offset), 4, &index);
 			if (ret < 0) {
 				return -1;
 			}
@@ -795,7 +795,7 @@ int hpack_decode_headers(struct hpack_context *hpack, const uint8_t *data, int d
 				}
 				name = static_name;
 			} else {
-				ret = hpack_decode_string(data + offset, data_len - offset, &allocated_name);
+				ret = hpack_decode_string(data + offset, (size_t)(data_len - offset), &allocated_name);
 				if (ret < 0) {
 					return -1;
 				}
@@ -803,7 +803,7 @@ int hpack_decode_headers(struct hpack_context *hpack, const uint8_t *data, int d
 				name = allocated_name;
 			}
 
-			ret = hpack_decode_string(data + offset, data_len - offset, &allocated_value);
+			ret = hpack_decode_string(data + offset, (size_t)(data_len - offset), &allocated_value);
 			if (ret < 0) {
 				free(allocated_name);
 				return -1;
