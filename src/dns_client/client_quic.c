@@ -516,10 +516,6 @@ static int _dns_client_process_quic_poll(struct dns_server_info *server_info)
 				int stream_ret =
 					_dns_client_process_quic_stream_read(server_info, conn_stream, poll_items[i].desc.value.ssl);
 				if (stream_ret > 0) {
-					/* Stream not finished: release the temporary poll reference taken at
-					  line 490. The server-list reference is retained in processed_list and
-					  will be restored later (goto out). */
-					_dns_client_conn_stream_put(conn_stream);
 					continue;
 				}
 
