@@ -370,12 +370,17 @@ errout:
 }
 
 #if defined(OSSL_QUIC1_VERSION) && !defined (OPENSSL_NO_QUIC)
+/* Maximum iterations for stream read loop to prevent blocking the event loop */
+#define QUIC_STREAM_READ_MAX_LOOP 16
+
 static int _dns_client_process_quic_stream_read(struct dns_server_info *server_info,
 												struct dns_conn_stream *conn_stream, SSL *quic_stream)
 {
 	int stream_ret = 1;
+	int loop_count = 0;
 
-	while (true) {
+	while (loop_count < QUIC_STREAM_READ_MAX_LOOP) {
+		loop_count++;
 		int recv_len = DNS_TCP_BUFFER - conn_stream->recv_buff.len;
 		if (recv_len <= 0) {
 			tlog(TLOG_DEBUG, "quic stream receive buffer is full.");
