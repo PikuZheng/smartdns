@@ -131,7 +131,6 @@ int _dns_client_recv(struct dns_server_info *server_info, unsigned char *inpacke
 		has_opt = 1;
 	}
 
-	time(&server_info->last_recv);
 	atomic_set(&server_info->is_alive, 1);
 	int latency = get_tick_count() - server_info->send_tick;
 	dns_stats_server_stats_avg_time_add(&server_info->stats, latency);
