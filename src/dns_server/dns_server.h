@@ -398,7 +398,6 @@ struct dns_request {
 	struct dns_request_pending_list *request_pending_list;
 
 	int no_select_possible_ip;
-	int no_cache_cname;
 	int no_cache;
 	int no_ipalias;
 
@@ -415,6 +414,7 @@ struct dns_server {
 	atomic_t run;
 	int epoll_fd;
 	int event_fd;
+	int neigh_netlink_fd;
 	struct list_head conn_list;
 	pthread_mutex_t conn_list_lock;
 
@@ -426,7 +426,7 @@ struct dns_server {
 	struct list_head request_list;
 	atomic_t request_num;
 
-	DECLARE_HASHTABLE(request_pending, 4);
+	DECLARE_HASHTABLE(request_pending, 12);
 	pthread_mutex_t request_pending_lock;
 
 	int update_neighbor_cache;

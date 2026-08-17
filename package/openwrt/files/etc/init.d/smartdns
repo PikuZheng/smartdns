@@ -113,7 +113,13 @@ set_main_dns()
 	uci_batch=""
 	[ "$dnsmasq_port" = "53" ] && {
 		uci_batch="$uci_batch set dhcp.@dnsmasq[0].port=0\n"
-		uci_batch="$uci_batch add_list dhcp.lan.dhcp_option=\"6,$hostip\"\n"
+		# add_list is not idempotent -- this function runs on every
+		# service start/restart/reload (not just once at install), so
+		# unconditionally add_list-ing here appended another duplicate
+		# "6,$hostip" to dhcp.lan.dhcp_option every single time.
+		if ! uci -q get dhcp.lan.dhcp_option 2>/dev/null | tr ' ' '\n' | grep -Fqx "6,$hostip"; then
+			uci_batch="$uci_batch add_list dhcp.lan.dhcp_option=\"6,$hostip\"\n"
+		fi
 	}
 
 	# for some third-party firmware
@@ -683,6 +689,9 @@ load_service()
 	config_get bind_cert "$section" "bind_cert" ""
 	config_get bind_cert_key "$section" "bind_cert_key" ""
 	config_get bind_cert_key_pass "$section" "bind_cert_key_pass" ""
+	config_get bind_cert_san "$section" "bind_cert_san" ""
+	config_get bind_cert_generate "$section" "bind_cert_generate" ""
+	config_get bind_cert_root_key "$section" "bind_cert_root_key" ""
 	config_get server_flags "$section" "server_flags" ""
 	config_get_bool ddr "$section" "ddr" "0"
 	[ "$ddr" = "1" ] && server_flags="$server_flags -ddr"
@@ -699,11 +708,11 @@ load_service()
 	config_get prefetch_domain "$section" "prefetch_domain" "0"
 	[ "$prefetch_domain" = "1" ] && conf_append "prefetch-domain" "yes"
 
-	config_get serve_expired "$section" "serve_expired" "0"
-	if [ "$serve_expired" = "1" ]; then
-		conf_append "serve-expired" "yes"
-	else
+	config_get serve_expired "$section" "serve_expired" "1"
+	if [ "$serve_expired" = "0" ]; then
 		conf_append "serve-expired" "no"
+	else
+		conf_append "serve-expired" "yes"
 	fi
 
 	config_get cache_size "$section" "cache_size" ""
@@ -892,6 +901,16 @@ load_service()
 	[ "$tls_server" = "1" ] && conf_append_bind "bind-tls" "$tls_server_port" "$device" "$ipv6_server" "$server_flags"
 	[ "$doh_server" = "1" ] && conf_append_bind "bind-https" "$doh_server_port" "$device" "$ipv6_server" "$server_flags"
 
+	[ -z "$bind_cert" ] && [ -z "$bind_cert_key" ] && [ "$tls_server$doh_server" != "00" ] && {
+		bind_cert="$SMARTDNS_CONF_DIR/smartdns-cert.pem"
+		bind_cert_key="$SMARTDNS_CONF_DIR/smartdns-key.pem"
+		bind_cert_root_key="$SMARTDNS_CONF_DIR/smartdns-root-key.pem"
+		bind_cert_generate="${bind_cert_generate:-yes}"
+	}
+
+	[ ! -z "$bind_cert_generate" ] && conf_append "bind-cert-generate" "$bind_cert_generate"
+	[ ! -z "$bind_cert_san" ] && conf_append "bind-cert-san" "$bind_cert_san"
+	[ ! -z "$bind_cert_root_key" ] && conf_append "bind-cert-root-key-file" "$bind_cert_root_key"
 	[ ! -z "$bind_cert" ] && conf_append "bind-cert-file" "$bind_cert"
 	[ ! -z "$bind_cert_key" ] && conf_append "bind-cert-key-file" "$bind_cert_key"
 	[ ! -z "$bind_cert_key_pass" ] && conf_append "bind-cert-key-pass" "$bind_cert_key_pass"
