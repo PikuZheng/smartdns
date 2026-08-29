@@ -47,6 +47,9 @@ struct nlmsgreq {
 
 enum { PAYLOAD_MAX = 2048 };
 
+/* result of the element lookup, UNKNOWN means the element may or may not be present */
+enum { NFTSET_IP_NOT_EXIST = 0, NFTSET_IP_EXIST, NFTSET_IP_UNKNOWN };
+
 static int nftset_fd;
 
 static int _nftset_get_nffamily_from_str(const char *family)
@@ -616,7 +619,7 @@ static int _nftset_test_ip_exists(int nffamily, const char *tablename, const cha
 			if (dns_conf.nftset_debug_enable) {
 				tlog(TLOG_DEBUG, "nftset test ip: EAGAIN error, assuming ip exists");
 			}
-			return 1;
+			return NFTSET_IP_UNKNOWN;
 		}
 
 		if (dns_conf.nftset_debug_enable) {
@@ -636,13 +639,13 @@ static int _nftset_test_ip_exists(int nffamily, const char *tablename, const cha
 		return 0;
 	}
 
-	int ip_exists = 0;
+	int ip_exists = NFTSET_IP_NOT_EXIST;
 
 	struct nlmsghdr *nlh = (struct nlmsghdr *)result;
 
 	/* If a successful response is received, it indicates that the IP already exists */
 	if (nlh->nlmsg_type == (NFNL_SUBSYS_NFTABLES << 8 | NFT_MSG_NEWSETELEM)) {
-		ip_exists = 1;
+		ip_exists = NFTSET_IP_EXIST;
 	}
 
 	/* Received an error message */
@@ -650,7 +653,7 @@ static int _nftset_test_ip_exists(int nffamily, const char *tablename, const cha
 		struct nlmsgerr *err = (struct nlmsgerr *)NLMSG_DATA(nlh);
 
 		if (err->error == -ENOENT) {
-			ip_exists = 0;
+			ip_exists = NFTSET_IP_NOT_EXIST;
 		} else if (dns_conf.nftset_debug_enable) {
 			tlog(TLOG_DEBUG, "nftset test ip error: family=%d, table=%s, set=%s, error=%d", nffamily, tablename,
 				 setname, -err->error);
@@ -790,7 +793,7 @@ int nftset_add(const char *familyname, const char *tablename, const char *setnam
 		addr_end_len = 0;
 	}
 
-	if (ip_exists) {
+	if (ip_exists == NFTSET_IP_EXIST) {
 		if (timeout <= 0) {
 			/* the element never expires, keep it as it is */
 			return 0;
@@ -802,8 +805,9 @@ int nftset_add(const char *familyname, const char *tablename, const char *setnam
 		 * instead of relying on the kernel version. */
 		ret = _nftset_add(nffamily, tablename, setname, addr, addr_len, addr_end, addr_end_len, timeout, 1);
 	} else {
-		/* Remove the element which timed out but is still pending for GC, it is sent as a separate
-		 * message because it may not exist at all */
+		/* Remove the element which timed out but is still pending for GC. It is sent as a separate
+		 * message because the element may not exist, either because it is a new one or because the
+		 * lookup above was not reliable, and a missing element would reject the whole batch. */
 		if (timeout > 0) {
 			_nftset_del(nffamily, tablename, setname, addr, addr_len, addr_end, addr_end_len);
 		}
