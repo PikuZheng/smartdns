@@ -675,6 +675,10 @@ static int _dns_server_setup_ipset_nftset_packet(struct dns_server_post_context 
 
 	if (conf->ipset_nftset.nftset_timeout_enable) {
 		nftset_timeout_value = timeout_value;
+		/* the expired result is still replied to the client, keep the element until the cache is gone */
+		if (conf->dns_serve_expired && conf->dns_serve_expired_ttl > 0) {
+			nftset_timeout_value += conf->dns_serve_expired_ttl;
+		}
 	}
 
 	for (j = 1; j < DNS_RRS_OPT; j++) {
