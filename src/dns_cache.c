@@ -200,7 +200,6 @@ struct dns_cache_data *dns_cache_new_data_packet(void *packet, size_t packet_len
 static void dns_cache_expired(struct tw_base *base, struct tw_timer_list *timer, void *data, unsigned long timestamp)
 {
 	struct dns_cache *dns_cache = data;
-	int mod_ret = 0;
 
 	if (dns_cache_head.timeout_callback) {
 		dns_cache_tmout_action_t tmout_act = dns_cache_head.timeout_callback(dns_cache);
@@ -208,13 +207,13 @@ static void dns_cache_expired(struct tw_base *base, struct tw_timer_list *timer,
 		case DNS_CACHE_TMOUT_ACTION_OK:
 			break;
 		case DNS_CACHE_TMOUT_ACTION_UPDATE:
-			mod_ret = dns_timer_mod(&dns_cache->timer, dns_cache->info.timeout);
+			dns_timer_mod(&dns_cache->timer, dns_cache->info.timeout);
 			goto out;
 		case DNS_CACHE_TMOUT_ACTION_DEL:
 			dns_cache_delete(dns_cache);
 			goto out;
 		case DNS_CACHE_TMOUT_ACTION_RETRY:
-			mod_ret = dns_timer_mod(&dns_cache->timer, DNS_CACHE_FAIL_TIMEOUT);
+			dns_timer_mod(&dns_cache->timer, DNS_CACHE_FAIL_TIMEOUT);
 			goto out;
 		default:
 			break;
@@ -224,9 +223,7 @@ static void dns_cache_expired(struct tw_base *base, struct tw_timer_list *timer,
 	dns_cache_release(dns_cache);
 	return;
 out:
-	if (mod_ret == 0) {
-		dns_cache_release(dns_cache);
-	}
+	dns_cache_release(dns_cache);
 }
 
 static struct dns_cache *_dns_cache_lookup(struct dns_cache_key *cache_key)
