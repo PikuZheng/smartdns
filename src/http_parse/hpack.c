@@ -777,6 +777,14 @@ int hpack_decode_headers(struct hpack_context *hpack, const uint8_t *data, int d
 				return -1;
 			}
 			offset += ret;
+			/* The decoded value is a full uint64_t; assigning it to the size_t
+			 * max_dynamic_table_size would truncate on 32-bit platforms and, on
+			 * any platform, allow unbounded dynamic table growth (memory
+			 * exhaustion). RFC 9113 requires rejecting values above the limit
+			 * advertised via SETTINGS_HEADER_TABLE_SIZE. */
+			if (new_size > HPACK_MAX_DYNAMIC_TABLE_SIZE) {
+				return -1;
+			}
 			hpack_resize_dynamic_table(hpack, new_size);
 			continue; /* Continue to next field */
 		} else {

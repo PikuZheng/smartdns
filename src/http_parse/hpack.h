@@ -8,6 +8,12 @@
 extern "C" {
 #endif
 
+/* Maximum value accepted for an HPACK dynamic table size update.
+ * Must match the SETTINGS_HEADER_TABLE_SIZE advertised by this endpoint
+ * (HTTP2_MAX_HEADER_TABLE_SIZE in http_parse/http2.c), as required by
+ * RFC 9113 section 6.5.2 / RFC 7541 section 4.2. */
+#define HPACK_MAX_DYNAMIC_TABLE_SIZE 65536
+
 /* HPACK dynamic table entry */
 struct hpack_dynamic_entry {
 	char *name;
