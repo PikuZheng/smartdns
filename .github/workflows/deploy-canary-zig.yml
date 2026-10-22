@@ -76,6 +76,7 @@ jobs:
           cp /usr/local/zig/bin/gcc /usr/local/zig/bin/clang
           cp /usr/local/zig/bin/g++ /usr/local/zig/bin/c++
           cp /usr/local/zig/bin/g++ /usr/local/zig/bin/clang++
+          printf '#!/bin/sh\nexec zig ar "\044@"\n' > /usr/local/zig/bin/ar
           chmod +x /usr/local/zig/bin/*
           export PATH=/usr/local/zig/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
           export CC=gcc
@@ -107,8 +108,8 @@ jobs:
           make clean && make
           cp ./libz.so.1.* ../libz.so.1
           cd /workdir
-          export CFLAGS="-O2 -fPIC -ffunction-sections -fdata-sections -fomit-frame-pointer -fno-unwind-tables -fno-asynchronous-unwind-tables -I/workdir/openssl/include -Wno-error=date-time -I/workdir/zlib -DWITH_ZLIB"
-          export LDFLAGS="-L /workdir/openssl -L /workdir/jemalloc/lib -ljemalloc -L /workdir/zlib -lz -Wl,-z,nocopyreloc"
+          export CFLAGS="-O2 -fPIC -flto -ffunction-sections -fdata-sections -fomit-frame-pointer -fno-unwind-tables -fno-asynchronous-unwind-tables -I/workdir/openssl/include -Wno-error=date-time -I/workdir/zlib -DWITH_ZLIB"
+          export LDFLAGS="-L /workdir/openssl -L /workdir/jemalloc/lib -ljemalloc -L /workdir/zlib -lz -Wl,-z,nocopyreloc -flto"
           make -C /workdir clean
           make -C /workdir all -j$(nproc) VER=${{needs.get-version.outputs.CUR_VERSION}}
           strip -d /workdir/src/smartdns || true
