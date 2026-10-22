@@ -1,0 +1,219 @@
+name: Docker Image Canary Zig
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - canary
+      
+jobs:
+  get-version:
+    name: get latest version number
+    runs-on: ubuntu-latest
+    outputs:
+      CUR_VERSION: ${{steps.get-version.outputs.CUR_VERSION}}
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        ref: VERSION_CONTROL
+        fetch-depth: 1
+        path: version_control
+    - name: get version
+      id: get-version
+      run: |
+          #获取当前版本号
+          pre_version=$(cat version_control/VERSION | grep "PREFEX" | sed 's/PREFEX=\(.*\)/\1/')
+          cur_version=$(cat version_control/VERSION | grep "CUR_VERS" | sed 's/CUR_VERS=\(.*\)/\1/')
+          echo "CUR_VERSION=$pre_version$cur_version-canary" >> $GITHUB_OUTPUT
+
+  build: 
+    needs: get-version
+    strategy:
+      matrix:
+        goarch: [x86_64, aarch64, armv7]
+        # bindgen 似乎不支持armv7和powerpc64le
+      fail-fast: false
+    runs-on: ubuntu-latest
+    env:
+      GOARCH: ${{ matrix.goarch }}
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/checkout@v3
+        with:
+          ref: BUILD-DEPENDENCIES
+          fetch-depth: 1
+          path: dependencies
+      - uses: docker/setup-qemu-action@v2
+      - uses: docker/setup-buildx-action@v2
+        with:
+          install: true
+      - name: build-smartdns
+        run: |
+          sudo timedatectl set-timezone "Asia/Shanghai"
+          cd ${{ github.workspace }}
+          mkdir -p ${{ github.workspace }}/build
+          sed -i 's/^HAS_UNWIND.*/HAS_UNWIND := 0/' ${{ github.workspace }}/src/Makefile
+          mkdir -p ${{ github.workspace }}/openssl
+          #curl -sSL https://github.com/openssl/openssl/releases/download/openssl-3.5.7/openssl-3.5.7.tar.gz -o openssl.tar.gz
+          tar -zxvf ./dependencies/openssl.tar.gz --strip-components 1 -C openssl
+          mkdir -p ${{ github.workspace }}/jemalloc
+          #curl -sSL  https://github.com/jemalloc/jemalloc/archive/refs/tags/5.3.0.tar.gz -o jemalloc.tar.gz
+          tar -zxvf ./dependencies/jemalloc.tar.gz --strip-components 1 -C jemalloc
+          mkdir -p ${{ github.workspace }}/zlib
+          #curl -fL --retry 5 --retry-all-errors --retry-delay 2 https://zlib.net/zlib-1.3.2.tar.gz -o zlib.tar.gz
+          tar -zxvf ./dependencies/zlib.tar.gz --strip-components 1 -C zlib
+          rm docker-openssl.sh || true
+          cat >> docker-openssl.sh << EOF
+          apk add perl make coreutils tar pkgconfig dpkg binutils autoconf zig
+          mkdir -p /usr/local/zig/bin
+          if [ "$GOARCH" == "armv7" ] ;then
+            printf '#!/bin/sh\nexec zig cc -target arm-linux-musleabihf "\044@"\n' > /usr/local/zig/bin/gcc
+            printf '#!/bin/sh\nexec zig c++ -target arm-linux-musleabihf "\044@"\n' > /usr/local/zig/bin/g++
+          else
+            printf '#!/bin/sh\nexec zig cc -target $GOARCH-linux-musl "\044@"\n' > /usr/local/zig/bin/gcc
+            printf '#!/bin/sh\nexec zig c++ -target $GOARCH-linux-musl "\044@"\n' > /usr/local/zig/bin/g++
+          fi
+          cp /usr/local/zig/bin/gcc /usr/local/zig/bin/cc
+          cp /usr/local/zig/bin/gcc /usr/local/zig/bin/clang
+          cp /usr/local/zig/bin/g++ /usr/local/zig/bin/c++
+          cp /usr/local/zig/bin/g++ /usr/local/zig/bin/clang++
+          chmod +x /usr/local/zig/bin/*
+          export PATH=/usr/local/zig/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          export CC=gcc
+          cd /workdir/openssl
+          if [ "$GOARCH" == "mipsel" ] || [ "$GOARCH" == "mips" ] ;then
+            ./Configure no-tests linux-mips32
+          elif [ "$GOARCH" == "mips64el" ] || [ "$GOARCH" == "mips64" ] ;then
+            ./Configure no-tests linux-mips64
+          elif [ "$GOARCH" == "i686" ] ;then
+            ./Configure no-tests linux-x86
+          elif [ "$GOARCH" == "powerpc64le" ] ;then
+            ./Configure no-tests linux-ppc64le
+          elif [ "$GOARCH" == "armv7" ] ;then
+            ./Configure no-tests linux-armv4 enable-quic enable-ktls no-docs
+          else
+            ./Configure no-tests linux-$GOARCH enable-quic enable-ktls no-docs
+          fi
+          make clean && make all
+          cd /workdir/jemalloc
+          ./autogen.sh && make distclean
+          if [ "$GOARCH" == "armv7" ] ;then
+            ./configure --host=armv7l-linux-musleabihf --disable-initial-exec-tls --disable-cxx
+          else
+            ./configure --host=$GOARCH-linux-musl --disable-cxx
+          fi
+          make
+          cd /workdir/zlib
+          LDSHARED="gcc -shared -Wl,-soname,libz.so.1,--version-script,zlib.map -Wl,--undefined-version" ./configure
+          make clean && make
+          cp ./libz.so.1.* ../libz.so.1
+          cd /workdir
+          export CFLAGS="-O2 -fPIC -ffunction-sections -fdata-sections -fomit-frame-pointer -fno-unwind-tables -fno-asynchronous-unwind-tables -I/workdir/openssl/include -Wno-error=date-time -I/workdir/zlib -DWITH_ZLIB"
+          export LDFLAGS="-L /workdir/openssl -L /workdir/jemalloc/lib -ljemalloc -L /workdir/zlib -lz -Wl,-z,nocopyreloc"
+          make -C /workdir clean
+          make -C /workdir all -j$(nproc) VER=${{needs.get-version.outputs.CUR_VERSION}}
+          strip -d /workdir/src/smartdns || true
+          EOF
+          docker run -i --rm -v ${{ github.workspace }}:/workdir alpine:3.24 sh /workdir/docker-openssl.sh
+      - name: build-nextjs
+        run: |
+          cd ${{ github.workspace }}
+          git clone https://github.com/PikuZheng/smartdns-webui.git
+          docker run -i --rm -v ${{ github.workspace }}:/workdir node:lts-alpine sh -c "cd /workdir/smartdns-webui && npm install && NODE_ENV=production npm run build --no-analytics"
+      - name: build-ui
+        run: |
+          rm docker-build.sh || true
+          cat >> docker-build.sh << EOF
+          cd /workdir/plugin/smartdns-ui
+          export OPENSSL_DIR=/workdir/openssl
+          export OPENSSL_LIB_DIR="/workdir/openssl"
+          export OPENSSL_INCLUDE_DIR="/workdir/openssl/include"
+          export RUSTFLAGS='-C link-arg=-Wl,-rpath,./ -C target-feature=-crt-static'
+          if  test "$GOARCH" = "armv7" ;then
+            apt update && apt install -y software-properties-common
+            add-apt-repository -y universe && add-apt-repository -y multiverse
+            apt update && apt-get install -y libc6-dev-armhf-cross
+            export AWS_LC_SYS_INCLUDES=/usr/arm-linux-gnueabihf/include
+            cargo add aws-lc-sys --features bindgen
+            cargo build --release --target=armv7-unknown-linux-musleabihf
+            cp ./target/armv7-unknown-linux-musleabihf/release/libsmartdns_ui.so ./
+            cp /usr/local/musl/armv7-unknown-linux-musleabihf/lib/libgcc_s.so.1 ./
+            cp /usr/local/musl/armv7-unknown-linux-musleabihf/lib/libstdc++.so.6 ./
+          else
+            cargo build --release --target=$GOARCH-unknown-linux-musl
+            cp ./target/$GOARCH-unknown-linux-musl/release/libsmartdns_ui.so ./
+            cp /usr/local/musl/$GOARCH-unknown-linux-musl/lib/libgcc_s.so.1 ./
+            cp /usr/local/musl/$GOARCH-unknown-linux-musl/lib/libstdc++.so.6 ./
+          fi
+          musl-strip libsmartdns_ui.so && musl-strip ../../src/smartdns && musl-strip ../../openssl/libcrypto.so.3 && musl-strip ../../openssl/libssl.so.3 && musl-strip libgcc_s.so.1 && musl-strip libstdc++.so.6 && musl-strip ../../jemalloc/lib/libjemalloc.so.2 && musl-strip ../../libz.so.1  || true
+          EOF
+          if  test "$GOARCH" = "armv7" ;then
+            docker run -i --rm -v ${{ github.workspace }}:/workdir messense/rust-musl-cross:armv7-musleabihf sh /workdir/docker-build.sh
+          else
+            docker run -i --rm -v ${{ github.workspace }}:/workdir messense/rust-musl-cross:$GOARCH-musl sh /workdir/docker-build.sh
+          fi
+          cd ${{ github.workspace }}
+          cat >> Dockerfile.unknown << 'EOF'
+          FROM alpine:3.24
+          ENV TZ="Asia/Shanghai"
+          ENV MALLOC_CONF="background_thread:false,dirty_decay_ms:0,muzzy_decay_ms:0,narenas:1,tcache:false,metadata_thp:disabled"
+          COPY ./src/smartdns /usr/sbin
+          COPY ./openssl/libcrypto.so ./openssl/libssl.so ./libz.so.1 ./plugin/smartdns-ui/libsmartdns_ui.so ./plugin/smartdns-ui/libgcc_s.so.1 ./plugin/smartdns-ui/libstdc++.so.6 ./jemalloc/lib/libjemalloc.so.2 /usr/lib
+          COPY ./smartdns-webui/out /wwwroot
+          RUN apk add --no-cache tzdata ca-certificates && (ldd /usr/sbin/smartdns 2>&1 | grep -q "libatomic.so" && apk add --no-cache libatomic || true)
+          RUN ln -sf /usr/lib/libssl.so /usr/lib/libssl.so.3 && ln -sf /usr/lib/libcrypto.so /usr/lib/libcrypto.so.3
+          RUN ln -sf /usr/lib/libsmartdns_ui.so /usr/lib/smartdns_ui.so
+          EXPOSE 53/udp 53/tcp 6080/tcp
+          VOLUME "/etc/smartdns/"
+          HEALTHCHECK --interval=5m --timeout=2s --start-period=5s CMD test $(nslookup dns.pub 127.0.0.1 |grep answer |wc -l) -gt 0
+          CMD ["/usr/sbin/smartdns", "-f", "-x", "-p -"]
+          EOF
+          docker login --username=${{ secrets.DOCKER_USERNAME }} --password='${{ secrets.DOCKER_PASSWORD }}'
+          if  test "$GOARCH" = "armv7" ;then
+            docker buildx build --no-cache --platform linux/arm/v7 --push -t pikuzheng/smartdns:ui-$GOARCH-canary -f Dockerfile.unknown .
+          else
+            docker buildx build --no-cache --platform linux/$GOARCH --push -t pikuzheng/smartdns:ui-$GOARCH-canary -f Dockerfile.unknown .
+          fi
+      - name: send to tencent cloud
+        continue-on-error: true
+        run: |
+          docker login ccr.ccs.tencentyun.com --username=${{ secrets.CCR_USERNAME }} --password='${{ secrets.CCR_PASSWORD }}'
+          if  test "$GOARCH" = "armv7" ;then
+            docker buildx build --no-cache --platform linux/arm/v7 --push -t pikuzheng/smartdns:ui-$GOARCH-canary -f Dockerfile.unknown .
+          else
+            docker buildx build --no-cache --platform linux/$GOARCH --push -t pikuzheng/smartdns:ui-$GOARCH-canary -f Dockerfile.unknown .
+          fi
+      - name: general tag and release ipk
+        id: tag
+        run: |
+          cd ${{ github.workspace }}
+          echo "release_tag=${{needs.get-version.outputs.CUR_VERSION}}_with_ui-canary" >> $GITHUB_OUTPUT
+          touch release.txt
+          echo "包含一些上游未合并的更新" >> release.txt
+          echo ${{ github.sha }} >> release.txt
+          echo "status=success" >> $GITHUB_OUTPUT
+      - name: Upload firmware to release
+        uses: softprops/action-gh-release@v1
+        if: steps.tag.outputs.status == 'success'
+        env:
+          GITHUB_TOKEN: ${{ secrets.TOKEN }}
+        with:
+          tag_name: ${{ steps.tag.outputs.release_tag }}
+          body_path: release.txt
+          files: |
+            ${{ github.workspace }}/build/*
+  create-manifest:
+    name: create docker manifest
+    needs: 
+      - build
+      - get-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: docker/setup-buildx-action@v2
+        with:
+          install: true
+      - name: create manifest
+        run: |
+          docker login --username=${{ secrets.DOCKER_USERNAME }} --password='${{ secrets.DOCKER_PASSWORD }}' && \
+          docker buildx imagetools create  -t pikuzheng/smartdns:canary pikuzheng/smartdns:ui-x86_64-canary pikuzheng/smartdns:ui-aarch64-canary pikuzheng/smartdns:ui-armv7-canary
+          docker login ccr.ccs.tencentyun.com --username=${{ secrets.CCR_USERNAME }} --password='${{ secrets.CCR_PASSWORD }}' && \
+          docker buildx imagetools create  -t pikuzheng/smartdns:canary pikuzheng/smartdns:ui-x86_64-canary pikuzheng/smartdns:ui-aarch64-canary pikuzheng/smartdns:ui-armv7-canary || true
