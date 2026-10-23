@@ -118,7 +118,6 @@ jobs:
           strip -d /workdir/src/smartdns || true
           EOF
           docker run -i --rm -v ${{ github.workspace }}:/workdir alpine:3.24 sh /workdir/docker-openssl.sh
-          rm ${{ github.workspace }}/build/*
       - name: build-nextjs
         run: |
           cd ${{ github.workspace }}
