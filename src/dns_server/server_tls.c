@@ -470,6 +470,7 @@ int _dns_server_socket_tls(struct dns_bind_ip *bind_ip, DNS_CONN_TYPE conn_type)
 	const SSL_METHOD *method = NULL;
 	SSL_CTX *ssl_ctx = NULL;
 	const int on = 1;
+	char err_buff[256] = {0};
 
 	host_ip = bind_ip->ip;
 	ssl_cert_file = bind_ip->ssl_cert_file;
@@ -513,13 +514,15 @@ int _dns_server_socket_tls(struct dns_bind_ip *bind_ip, DNS_CONN_TYPE conn_type)
 
 	/* Set the key and cert */
 	if (ssl_cert_file[0] != '\0' && SSL_CTX_use_certificate_chain_file(ssl_ctx, ssl_cert_file) <= 0) {
-		tlog(TLOG_ERROR, "load cert %s failed, %s", ssl_cert_file, ERR_error_string(ERR_get_error(), NULL));
+		tlog(TLOG_ERROR, "load cert %s failed, %s", ssl_cert_file,
+			 ERR_error_string_n(ERR_get_error(), err_buff, sizeof(err_buff)));
 		goto errout;
 	}
 
 	if (ssl_cert_key_file[0] != '\0' &&
 		SSL_CTX_use_PrivateKey_file(ssl_ctx, ssl_cert_key_file, SSL_FILETYPE_PEM) <= 0) {
-		tlog(TLOG_ERROR, "load cert key %s failed, %s", ssl_cert_key_file, ERR_error_string(ERR_get_error(), NULL));
+		tlog(TLOG_ERROR, "load cert key %s failed, %s", ssl_cert_key_file,
+			 ERR_error_string_n(ERR_get_error(), err_buff, sizeof(err_buff)));
 		goto errout;
 	}
 

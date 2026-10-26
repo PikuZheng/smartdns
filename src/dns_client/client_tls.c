@@ -335,7 +335,10 @@ SSL_CTX *_ssl_ctx_get(int is_quic)
 	}
 #else
 	if (is_quic) {
-		return NULL;
+		/* QUIC is not available in this OpenSSL build; go through the
+		 * unified error path so server_list_lock is released and NULL is
+		 * returned consistently. */
+		goto errout;
 	}
 	*ssl_ctx = SSL_CTX_new(TLS_client_method());
 #endif
@@ -590,7 +593,7 @@ int _dns_client_socket_ssl_send_ext(struct dns_server_info *server, SSL *ssl, co
 			return -1;
 		}
 
-		tlog(TLOG_WARN, "server %s SSL write fail error: %s", server->ip, ERR_error_string(ssl_err, buff));
+		tlog(TLOG_WARN, "server %s SSL write fail error: %s", server->ip, ERR_error_string_n(ssl_err, buff, sizeof(buff)));
 		errno = EFAULT;
 		ret = -1;
 	} break;
@@ -659,7 +662,7 @@ int _dns_client_socket_ssl_recv_ext(struct dns_server_info *server, SSL *ssl, vo
 			break;
 		}
 
-		tlog(TLOG_WARN, "server %s SSL read fail error: %s", server->ip, ERR_error_string(ssl_err, buff));
+		tlog(TLOG_WARN, "server %s SSL read fail error: %s", server->ip, ERR_error_string_n(ssl_err, buff, sizeof(buff)));
 		errno = EFAULT;
 		ret = -1;
 	} break;

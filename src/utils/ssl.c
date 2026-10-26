@@ -252,14 +252,17 @@ static void _free_key(struct DNS_EVP_PKEY_CTX *ctx)
 			EVP_PKEY_free(ctx->pkey);
 		}
 #if (OPENSSL_VERSION_NUMBER < 0x30000000L)
+		/* On the 1.0.x path ctx->rsa is NULL once EVP_PKEY_assign_RSA()
+		 * has taken ownership of it, so this is only reached for the
+		 * allocation failure paths. */
 		if (ctx->rsa) {
 			RSA_free(ctx->rsa);
 		}
 		if (ctx->bn) {
 			BN_free(ctx->bn);
 		}
-		free(ctx);
 #endif
+		free(ctx);
 	}
 }
 
@@ -310,16 +313,37 @@ static struct DNS_EVP_PKEY_CTX *_generate_key(void)
 	const int RSA_KEY_LENGTH = 2048;
 #if (OPENSSL_VERSION_NUMBER >= 0x30000000L)
 	ctx->pkey = EVP_RSA_gen(RSA_KEY_LENGTH);
+	if (ctx->pkey == NULL) {
+		goto errout;
+	}
 #else
 	ctx->pkey = EVP_PKEY_new();
+	if (ctx->pkey == NULL) {
+		goto errout;
+	}
 	ctx->rsa = RSA_new();
+	if (ctx->rsa == NULL) {
+		goto errout;
+	}
 	ctx->bn = BN_new();
+	if (ctx->bn == NULL) {
+		goto errout;
+	}
 
 	BN_set_word(ctx->bn, RSA_F4);
 	RSA_generate_key_ex(ctx->rsa, RSA_KEY_LENGTH, ctx->bn, NULL);
-	EVP_PKEY_assign_RSA(ctx->pkey, ctx->rsa);
+	if (EVP_PKEY_assign_RSA(ctx->pkey, ctx->rsa) != 1) {
+		goto errout;
+	}
+	/* EVP_PKEY_assign_RSA() transfers ownership of ctx->rsa to ctx->pkey;
+	 * clear the pointer so _free_key() won't double-free it. */
+	ctx->rsa = NULL;
 #endif
 	return ctx;
+
+errout:
+	_free_key(ctx);
+	return NULL;
 }
 
 static X509 *_generate_smartdns_cert(EVP_PKEY *pkey, X509 *issuer_cert, EVP_PKEY *issuer_key, const char *san, int days)
@@ -345,8 +369,17 @@ static X509 *_generate_smartdns_cert(EVP_PKEY *pkey, X509 *issuer_cert, EVP_PKEY
 
 	X509_set_version(cert, 2);
 	ASN1_INTEGER_set(X509_get_serialNumber(cert), rand());
+#if OPENSSL_VERSION_NUMBER >= 0x10100000L
+	/* Since OpenSSL 1.1.0 X509_get_notBefore()/X509_get_notAfter() return a
+	 * const ASN1_TIME *, and on 4.0 they are read-only, so use the mutable
+	 * accessors that X509_gmtime_adj() requires (which only exist on 1.1.0+).
+	 * On 1.0.x the original accessors are mutable, so the #else branch is used. */
+	X509_gmtime_adj(X509_getm_notBefore(cert), 0);
+	X509_gmtime_adj(X509_getm_notAfter(cert), days * 24 * 3600);
+#else
 	X509_gmtime_adj(X509_get_notBefore(cert), 0);
 	X509_gmtime_adj(X509_get_notAfter(cert), days * 24 * 3600);
+#endif
 
 	X509_set_pubkey(cert, pkey);
 
@@ -604,6 +637,13 @@ static __attribute__((unused)) unsigned long _pthreads_thread_id(void)
 	return (ret);
 }
 
+#if OPENSSL_API_COMPAT >= 0x10000000
+static __attribute__((unused)) void _pthreads_thread_id_cb(CRYPTO_THREADID *id)
+{
+	CRYPTO_THREADID_set_numeric(id, _pthreads_thread_id());
+}
+#endif
+
 void SSL_CRYPTO_thread_setup(void)
 {
 	int i = 0;
@@ -632,7 +672,7 @@ void SSL_CRYPTO_thread_setup(void)
 #if OPENSSL_API_COMPAT < 0x10000000
 	CRYPTO_set_id_callback(_pthreads_thread_id);
 #else
-	CRYPTO_THREADID_set_callback(_pthreads_thread_id);
+	CRYPTO_THREADID_set_callback(_pthreads_thread_id_cb);
 #endif
 	CRYPTO_set_locking_callback(_pthreads_locking_callback);
 }

@@ -166,10 +166,12 @@ void _dns_client_close_socket_ext(struct dns_server_info *server_info, int no_de
 		server_info->http2_ctx = NULL;
 	}
 
+#if defined(OSSL_QUIC1_VERSION) && !defined (OPENSSL_NO_QUIC)
 	if (server_info->bio_method) {
 		BIO_meth_free(server_info->bio_method);
 		server_info->bio_method = NULL;
 	}
+#endif
 
 	if (server_info->proxy) {
 		proxy_conn_free(server_info->proxy);
