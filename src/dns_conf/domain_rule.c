@@ -726,7 +726,10 @@ int _config_domain_rule_remove(const char *domain, enum domain_rule type)
 		return -1;
 	}
 
-	if (domain_rule->rules[type] == NULL) {
+	/* Guard against out-of-bounds access: a domain rule may have a smaller
+	 * capacity than the requested type (e.g. deleting a high-numbered rule
+	 * that was never added). */
+	if (type >= domain_rule->capacity || domain_rule->rules[type] == NULL) {
 		return 0;
 	}
 
@@ -793,9 +796,11 @@ int _config_domain_rule_add(const char *domain, enum domain_rule type, void *rul
 	/* add new rule to domain */
 	struct dns_rule *prule = (struct dns_rule *)rule;
 	int is_cloned = 0;
-	if (atomic_read(&prule->refcnt) > 1 &&
-		(prule->sub_only != sub_rule_only || prule->root_only != root_rule_only ||
-		 dns_rule_info_table[prule->rule].is_list)) {
+	/* Clone whenever the rule is shared (refcnt > 1): the rule object is
+	 * inherited/mutated per-domain (sub_only/root_only), so storing it into a
+	 * child domain without copying would corrupt the parent/sibling domains
+	 * that share the same object. */
+	if (atomic_read(&prule->refcnt) > 1) {
 		struct dns_rule *new_rule = _dns_rule_clone(prule);
 		if (new_rule) {
 			prule = new_rule;
