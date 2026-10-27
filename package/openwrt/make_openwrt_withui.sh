@@ -117,7 +117,7 @@ build()
 			--script "post-install:$ROOT/control/postinst" \
 			--script "pre-deinstall:$ROOT/control/prerm" \
 			--files "$ROOT/root/" \
-			--output "$OUTPUTDIR/smartdns.$VER.$FILEARCH.apk"
+			--output "$OUTPUTDIR/smartdns_with_ui.$VER.$FILEARCH.apk"
 		if [ $? -ne 0 ]; then
 			echo "build apk package failed."
 			rm -fr $ROOT/
