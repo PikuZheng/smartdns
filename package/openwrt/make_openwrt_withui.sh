@@ -87,9 +87,7 @@ build()
 		echo "Installed-Size: $INST_SIZE" >> $ROOT/control/control
 	fi
 
-	if [ "$STATIC" = "yes" ]; then
-		sed -i "s/Depends:.*/Depends: libc/" $ROOT/control/control
-	fi
+	sed -i -e "s/, *libopenssl *,* */,/g" -e "s/^Depends: *,/Depends:/" -e "s/, *$//" $ROOT/control/control
 
 	cd $ROOT/control
 	chmod +x *
@@ -115,7 +113,7 @@ build()
 			--script "post-install:$ROOT/control/postinst" \
 			--script "pre-deinstall:$ROOT/control/prerm" \
 			--files "$ROOT/root/" \
-			--output "$OUTPUTDIR/smartdns.$VER.$FILEARCH.apk"
+			--output "$OUTPUTDIR/smartdns_with_ui.$VER.$FILEARCH.apk"
 		if [ $? -ne 0 ]; then
 			echo "build apk package failed."
 			rm -fr $ROOT/

@@ -593,7 +593,8 @@ int _dns_client_socket_ssl_send_ext(struct dns_server_info *server, SSL *ssl, co
 			return -1;
 		}
 
-		tlog(TLOG_WARN, "server %s SSL write fail error: %s", server->ip, ERR_error_string_n(ssl_err, buff, sizeof(buff)));
+		ERR_error_string_n(ssl_err, buff, sizeof(buff));
+		tlog(TLOG_WARN, "server %s SSL write fail error: %s", server->ip, buff);
 		errno = EFAULT;
 		ret = -1;
 	} break;
@@ -662,7 +663,8 @@ int _dns_client_socket_ssl_recv_ext(struct dns_server_info *server, SSL *ssl, vo
 			break;
 		}
 
-		tlog(TLOG_WARN, "server %s SSL read fail error: %s", server->ip, ERR_error_string_n(ssl_err, buff, sizeof(buff)));
+		ERR_error_string_n(ssl_err, buff, sizeof(buff));
+		tlog(TLOG_WARN, "server %s SSL read fail error: %s", server->ip, buff);
 		errno = EFAULT;
 		ret = -1;
 	} break;
