@@ -78,6 +78,7 @@ jobs:
           cp /usr/local/zig/bin/gcc /usr/local/zig/bin/clang
           cp /usr/local/zig/bin/g++ /usr/local/zig/bin/c++
           cp /usr/local/zig/bin/g++ /usr/local/zig/bin/clang++
+          printf '#!/bin/sh\nexec zig ar "\044@"\n' > /usr/local/zig/bin/ar
           chmod +x /usr/local/zig/bin/*
           export PATH=/usr/local/zig/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
           export CC=gcc
@@ -109,10 +110,13 @@ jobs:
           make clean && make
           cp ./libz.so.1.* ../libz.so.1
           cd /workdir
-          export CFLAGS="-Os -ffunction-sections -fdata-sections -fomit-frame-pointer -fno-unwind-tables -fno-asynchronous-unwind-tables -I/workdir/openssl/include -Wno-error=date-time -I/workdir/zlib -DWITH_ZLIB"
-          export LDFLAGS="-L /workdir/openssl -L /workdir/jemalloc/lib -ljemalloc -L /workdir/zlib -lz"
-          export CFLAGS="-O2 -fPIC -ffunction-sections -fdata-sections -fomit-frame-pointer -fno-unwind-tables -fno-asynchronous-unwind-tables -I/workdir/openssl/include -Wno-error=date-time -I/workdir/zlib -DWITH_ZLIB"
-          export LDFLAGS="-L /workdir/openssl -L /workdir/jemalloc/lib -ljemalloc -L /workdir/zlib -lz -Wl,-z,nocopyreloc"
+          if [ "$GOARCH" == "armv7" ] ;then
+            export CFLAGS="-O2 -fPIC -ffunction-sections -fdata-sections -fomit-frame-pointer -fno-unwind-tables -fno-asynchronous-unwind-tables -I/workdir/openssl/include -Wno-error=date-time -I/workdir/zlib -DWITH_ZLIB"
+            export LDFLAGS="-L /workdir/openssl -L /workdir/jemalloc/lib -ljemalloc -L /workdir/zlib -lz -Wl,-z,nocopyreloc"
+          else
+            export CFLAGS="-O2 -fPIC -flto -ffunction-sections -fdata-sections -fomit-frame-pointer -fno-unwind-tables -fno-asynchronous-unwind-tables -I/workdir/openssl/include -Wno-error=date-time -I/workdir/zlib -DWITH_ZLIB"
+            export LDFLAGS="-L /workdir/openssl -L /workdir/jemalloc/lib -ljemalloc -L /workdir/zlib -lz -Wl,-z,nocopyreloc -flto"
+          fi
           make -C /workdir clean
           make -C /workdir all -j$(nproc) VER=${{needs.get-version.outputs.CUR_VERSION}}
           strip -d /workdir/src/smartdns || true
@@ -193,17 +197,36 @@ jobs:
           mkdir -p ${{ github.workspace }}/build || true
           rm docker-openssl.sh || true
           cat >> docker-openssl.sh << EOF
-          apk add perl make coreutils tar pkgconfig dpkg binutils
-          cd /workdir
-          export CFLAGS="-I /workdir/openssl/include -Wno-error=date-time -I/workdir/zlib -DWITH_ZLIB"
-          export LDFLAGS="-L /workdir/openssl -L /workdir/zlib -lz"
-          ./package/build-pkg.sh --platform linux --arch all --filearch $GOARCH-linux --outputdir /workdir/build
-          EOF
-          if  test "$GOARCH" = "armv7" ;then
-            docker run -i --rm -v ${{ github.workspace }}:/workdir muslcc/x86_64:armv7l-linux-musleabihf sh /workdir/docker-openssl.sh
+          apk add perl make coreutils tar pkgconfig dpkg binutils autoconf zig
+          mkdir -p /usr/local/zig/bin
+          if [ "$GOARCH" == "armv7" ] ;then
+            printf '#!/bin/sh\nexec zig cc -target arm-linux-musleabihf "\044@"\n' > /usr/local/zig/bin/gcc
+            printf '#!/bin/sh\nexec zig c++ -target arm-linux-musleabihf "\044@"\n' > /usr/local/zig/bin/g++
           else
-            docker run -i --rm -v ${{ github.workspace }}:/workdir muslcc/x86_64:$GOARCH-linux-musl sh /workdir/docker-openssl.sh
+            printf '#!/bin/sh\nexec zig cc -target $GOARCH-linux-musl "\044@"\n' > /usr/local/zig/bin/gcc
+            printf '#!/bin/sh\nexec zig c++ -target $GOARCH-linux-musl "\044@"\n' > /usr/local/zig/bin/g++
           fi
+          cp /usr/local/zig/bin/gcc /usr/local/zig/bin/cc
+          cp /usr/local/zig/bin/gcc /usr/local/zig/bin/clang
+          cp /usr/local/zig/bin/g++ /usr/local/zig/bin/c++
+          cp /usr/local/zig/bin/g++ /usr/local/zig/bin/clang++
+          printf '#!/bin/sh\nexec zig ar "\044@"\n' > /usr/local/zig/bin/ar
+          chmod +x /usr/local/zig/bin/*
+          export PATH=/usr/local/zig/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          export CC=gcc
+          cd /workdir
+          if [ "$GOARCH" == "armv7" ] ;then
+            export CFLAGS="-O2 -fPIC -ffunction-sections -fdata-sections -fomit-frame-pointer -fno-unwind-tables -fno-asynchronous-unwind-tables -I/workdir/openssl/include -Wno-error=date-time -I/workdir/zlib -DWITH_ZLIB"
+            export LDFLAGS="-L /workdir/openssl -L /workdir/zlib -lz -Wl,-z,nocopyreloc"
+          else
+            export CFLAGS="-O2 -fPIC -flto -ffunction-sections -fdata-sections -fomit-frame-pointer -fno-unwind-tables -fno-asynchronous-unwind-tables -I/workdir/openssl/include -Wno-error=date-time -I/workdir/zlib -DWITH_ZLIB"
+            export LDFLAGS="-L /workdir/openssl -L /workdir/zlib -lz -Wl,-z,nocopyreloc -flto"
+          fi
+          make -C /workdir clean
+          make -C /workdir all -j$(nproc) VER=${{needs.get-version.outputs.CUR_VERSION}}
+          strip -d /workdir/src/smartdns || true
+          EOF
+          docker run -i --rm -v ${{ github.workspace }}:/workdir alpine:3.24 sh /workdir/docker-openssl.sh
       - name: release ipk
         run: |
           cd ${{ github.workspace }}/package/openwrt
