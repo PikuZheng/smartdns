@@ -171,6 +171,15 @@ static int dns_server_resolve_callback(const char *domain, dns_result_type rtype
 				context.reply_ttl = _dns_server_get_reply_ttl(request, ttl);
 				context.cache_ttl = _dns_server_get_conf_ttl(request, ttl);
 				request->ip_ttl = context.cache_ttl;
+				/*
+				* Do not let the immediate reply pre-populate request->ip_map with
+				* the first pool's addresses (ping_time = -1); otherwise the later
+				* _dns_server_process_answer finds them already present and skips
+				* speed-checking them, so the whole first pool keeps RTT -1 and is
+				* dropped when the cache is compiled. The background phase will
+				* re-add and benchmark the first pool via the normal path.
+				*/
+				context.no_check_add_ip = 1;
 				_dns_server_reply_passthrough(&context);
 				request->cname[0] = 0;
 				request->has_ip = 0;
