@@ -1,0 +1,35 @@
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Contributor: zlowly <zlowly@gmail.com>
+
+
+pkgname=smartdns
+pkgver=48.4
+pkgrel=4
+pkgdesc="A local DNS server to obtain the fastest website IP for the best Internet experience"
+arch=('x86_64')
+license=('GPL-3.0-or-later')
+url="https://github.com/pymumu/smartdns"
+backup=("etc/smartdns/smartdns.conf" "etc/default/smartdns")
+depends=('glibc' 'libgcc' 'openssl' 'zlib')
+makedepends=('systemd')
+checkdepends=('gtest' 'bind')
+source=()
+sha256sums=()
+
+prepare() {
+  mkdir -p "$srcdir/smartdns"
+  cp -a "$startdir/../project/." "$srcdir/smartdns/"
+}
+
+build() {
+  cd "$srcdir/smartdns"
+  make RUNSTATEDIR=/run SBINDIR=/usr/bin
+}
+
+package() {
+  cd "$srcdir/smartdns"
+  make RUNSTATEDIR=/run SBINDIR=/usr/bin \
+    DESTDIR="$pkgdir" install
+
+  rm -rf "$pkgdir/etc/init.d"
+}
