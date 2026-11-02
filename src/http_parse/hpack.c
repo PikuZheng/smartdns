@@ -781,7 +781,8 @@ int hpack_decode_headers(struct hpack_context *hpack, const uint8_t *data, int d
 		} else {
 			/* Literal without indexing or never indexed */
 			uint64_t index;
-			int ret = hpack_decode_integer(data + offset, (size_t)(data_len - offset), 4, &index);
+			int prefix = 4; /* Both types use 4-bit prefix */
+			int ret = hpack_decode_integer(data + offset, (size_t)(data_len - offset), prefix, &index);
 			if (ret < 0) {
 				return -1;
 			}

@@ -945,7 +945,7 @@ int dns_cache_save(const char *file, int check_lock)
 		pthread_mutex_unlock(&dns_cache_head.lock);
 	}
 
-	fd = open(file, O_TRUNC | O_CREAT | O_WRONLY, 0640);
+	fd = open(file, O_TRUNC | O_CREAT | O_WRONLY, 0644);
 	if (fd < 0) {
 		tlog(TLOG_ERROR, "create file %s failed, %s", file, strerror(errno));
 		goto errout;
