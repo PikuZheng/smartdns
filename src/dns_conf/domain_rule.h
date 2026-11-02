@@ -43,6 +43,8 @@ void *dns_conf_get_domain_rule(const char *domain, enum domain_rule type);
 int _config_domain_rule_free(struct dns_domain_rule *domain_rule);
 void _config_domain_rule_pool_clear(void);
 
+void _config_domain_rule_pool_clear(void);
+
 int _conf_domain_rule_speed_check(char *domain, const char *mode);
 int _conf_domain_rule_response_mode(char *domain, const char *mode);
 
