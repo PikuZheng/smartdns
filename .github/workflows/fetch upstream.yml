@@ -17,7 +17,7 @@ jobs:
           base: master
           head: master
           auto_approve: true
-          github_token: ${{ secrets.TOKEN }}
+          token: ${{ secrets.TOKEN }}
 
       - name: Delete workflow runs
         uses: Mattraks/delete-workflow-runs@v2
