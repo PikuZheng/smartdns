@@ -27,6 +27,7 @@ CUSTOM_CONF=$CURR_DIR/custom.conf
 DOMAIN_BLOCK_LIST=$CURR_DIR/domain-block.list
 DOMAIN_FORWARDING_LIST=$CURR_DIR/domain-forwarding.list
 SMARTDNS_UI_LIB=$SMARTDNS_DIR/plugin/smartdns-ui/libsmartdns_ui.so
+SMARTDNS_Z_LIB=$SMARTDNS_DIR/libz.so.1
 SMARTDNS_OPENSSL_DIR=$SMARTDNS_DIR/openssl
 SMARTDNS_WEBUI_DIR=$SMARTDNS_DIR/smartdns-webui/out
 
@@ -67,6 +68,7 @@ build()
 	cp $DOMAIN_FORWARDING_LIST $ROOT/root/etc/smartdns/
 	cp $CURR_DIR/files/etc $ROOT/root/ -af
 	cp $SMARTDNS_UI_LIB $ROOT/root/usr/lib/smartdns_ui.so
+	cp SMARTDNS_Z_LIB $ROOT/root/usr/lib/smartdns/libz.so.1
 	cp $SMARTDNS_OPENSSL_DIR/libcrypto.so.3 $ROOT/root/usr/lib/smartdns/
 	cp $SMARTDNS_OPENSSL_DIR/libssl.so.3 $ROOT/root/usr/lib/smartdns/
 	cp -r $SMARTDNS_WEBUI_DIR/* $ROOT/root/usr/share/smartdns/wwwroot/
