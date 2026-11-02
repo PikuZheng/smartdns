@@ -21,7 +21,10 @@
 #include "include/utils.h"
 #include "server.h"
 #include "gtest/gtest.h"
+#include <condition_variable>
+#include <mutex>
 #include <unistd.h>
+#include "smartdns/dns_server.h"
 
 class FastestResponse : public ::testing::Test
 {
@@ -111,4 +114,66 @@ speed-check-mode ping
 	EXPECT_EQ(client.GetAnswer()[0].GetName(), "a.com");
 	EXPECT_EQ(client.GetAnswer()[0].GetData(), "1.2.3.4");
 	EXPECT_EQ(client.GetAnswer()[1].GetData(), "5.6.7.8");
+}
+
+/* Internal queries (e.g. resolving an upstream given by hostname) get their result through the request
+ * callback. In fastest-response mode the immediate reply must still report the IPs (ip_num > 0). */
+struct FastestResponseResult {
+	std::mutex lock;
+	std::condition_variable cond;
+	bool done = false;
+	int ip_num = -1;
+};
+
+static int FastestResponseCallback(const struct dns_result *result, void *user_ptr)
+{
+	auto *r = (struct FastestResponseResult *)user_ptr;
+	std::lock_guard<std::mutex> guard(r->lock);
+	if (!r->done) {
+		r->ip_num = result->ip_num;
+		r->done = true;
+		r->cond.notify_all();
+	}
+	return 0;
+}
+
+TEST_F(FastestResponse, internal_query_result_has_ip)
+{
+	smartdns::MockServer server_upstream1;
+	smartdns::MockServer server_upstream2;
+	smartdns::Server server(smartdns::Server::CREATE_MODE_THREAD);
+
+	server_upstream1.Start("udp://0.0.0.0:61053", [](struct smartdns::ServerRequestContext *request) {
+		if (request->qtype != DNS_T_A) {
+			return smartdns::SERVER_REQUEST_SOA;
+		}
+		smartdns::MockServer::AddIP(request, request->domain.c_str(), "1.2.3.4");
+		return smartdns::SERVER_REQUEST_OK;
+	});
+	server_upstream2.Start("udp://0.0.0.0:62053", [](struct smartdns::ServerRequestContext *request) {
+		if (request->qtype != DNS_T_A) {
+			return smartdns::SERVER_REQUEST_SOA;
+		}
+		usleep(100 * 1000);
+		smartdns::MockServer::AddIP(request, request->domain.c_str(), "5.6.7.8");
+		return smartdns::SERVER_REQUEST_OK;
+	});
+	server.MockPing(PING_TYPE_ICMP, "1.2.3.4", 60, 10);
+	server.MockPing(PING_TYPE_ICMP, "5.6.7.8", 60, 12);
+
+	ASSERT_TRUE(server.Start(R"""(bind [::]:60053
+server 127.0.0.1:61053
+server 127.0.0.1:62053
+response-mode fastest-response
+dualstack-ip-selection no
+speed-check-mode ping
+)"""));
+
+	FastestResponseResult result;
+	ASSERT_EQ(dns_server_query("internal.example", DNS_T_A, nullptr, FastestResponseCallback, &result), 0);
+	{
+		std::unique_lock<std::mutex> lock(result.lock);
+		ASSERT_TRUE(result.cond.wait_for(lock, std::chrono::seconds(5), [&] { return result.done; }));
+	}
+	EXPECT_GT(result.ip_num, 0);
 }

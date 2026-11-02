@@ -149,24 +149,17 @@ static int hpack_decode_integer(const uint8_t *data, size_t data_len, unsigned i
 
 	while (offset < data_len) {
 		uint8_t byte = data[offset++];
-		uint64_t incr = (uint64_t)(byte & 0x7F);
-		/* Check for uint64_t overflow before shifting / adding.
-		 * incr << shift must not overflow; result + (incr << shift) must not overflow. */
-		if (incr > (UINT64_MAX >> shift)) {
+		uint64_t chunk = byte & 0x7F;
+
+		if (shift >= 64 || chunk > (UINT64_MAX - result) >> shift) {
 			return -1;
 		}
-		if (result > UINT64_MAX - (incr << shift)) {
-			return -1;
-		}
-		result += incr << shift;
-		shift += 7;
+		result += chunk << shift;
 		if ((byte & 0x80) == 0) {
 			*value = result;
 			return (int)offset;
 		}
-		if (shift > 63) {
-			return -1;
-		}
+		shift += 7;
 	}
 
 	return -1;
@@ -359,19 +352,14 @@ static int hpack_decode_huffman(const uint8_t *src, size_t src_len, uint8_t *dst
 			}
 
 			if (!found) {
-				/* No match found - might need more bits or it's padding */
-				if (i == src_len - 1) {
-					/* Last byte - remaining bits should be padding (all 1s) */
-					uint32_t padding_mask = (1U << nbits) - 1;
-					uint32_t remaining = (uint32_t)(bits & padding_mask);
-					if (remaining == padding_mask) {
-						/* Valid padding */
-						return dst_pos;
-					}
-				}
 				break; /* Need more bits */
 			}
 		}
+	}
+
+	/* RFC 7541 5.2: padding is at most 7 bits and must be the EOS prefix (all 1s) */
+	if (nbits > 7 || bits != (((uint64_t)1 << nbits) - 1)) {
+		return -1;
 	}
 
 	return dst_pos;
@@ -380,6 +368,7 @@ static int hpack_decode_huffman(const uint8_t *src, size_t src_len, uint8_t *dst
 static int hpack_decode_string(const uint8_t *data, size_t data_len, char **str)
 {
 	uint64_t len;
+	size_t string_len;
 	int huffman;
 	size_t offset = 0;
 	int ret;
@@ -395,20 +384,26 @@ static int hpack_decode_string(const uint8_t *data, size_t data_len, char **str)
 	}
 	offset += (size_t)ret;
 
-	if (offset + len > data_len) {
+	if (offset > data_len || len > (uint64_t)(data_len - offset) || len > SIZE_MAX - 1) {
 		return -1;
 	}
+	string_len = (size_t)len;
 
 	if (huffman) {
 		/* Huffman decoding */
+		size_t decoded_capacity;
 
-		/* Allocate buffer for decoded string (worst case: same size as encoded) */
-		uint8_t *decoded = malloc(len * 2 + 1); /* Extra space for safety */
+		/* Bound the 2x buffer used for decoded output. */
+		if (string_len > ((size_t)INT_MAX - 1) / 2 || string_len > (SIZE_MAX - 1) / 2) {
+			return -1;
+		}
+		decoded_capacity = string_len * 2;
+		uint8_t *decoded = malloc(decoded_capacity + 1); /* Extra space for safety */
 		if (!decoded) {
 			return -1;
 		}
 
-		int decoded_len = hpack_decode_huffman(data + offset, len, decoded, len * 2);
+		int decoded_len = hpack_decode_huffman(data + offset, string_len, decoded, decoded_capacity);
 		if (decoded_len < 0) {
 			free(decoded);
 			return -1;
@@ -425,16 +420,16 @@ static int hpack_decode_string(const uint8_t *data, size_t data_len, char **str)
 		free(decoded);
 	} else {
 		/* Literal string */
-		*str = malloc(len + 1);
+		*str = malloc(string_len + 1);
 		if (*str == NULL) {
 			return -1;
 		}
 
-		memcpy(*str, data + offset, len);
-		(*str)[len] = '\0';
+		memcpy(*str, data + offset, string_len);
+		(*str)[string_len] = '\0';
 	}
 
-	offset += len;
+	offset += (int)string_len;
 
 	return offset;
 }
@@ -777,11 +772,7 @@ int hpack_decode_headers(struct hpack_context *hpack, const uint8_t *data, int d
 				return -1;
 			}
 			offset += ret;
-			/* The decoded value is a full uint64_t; assigning it to the size_t
-			 * max_dynamic_table_size would truncate on 32-bit platforms and, on
-			 * any platform, allow unbounded dynamic table growth (memory
-			 * exhaustion). RFC 9113 requires rejecting values above the limit
-			 * advertised via SETTINGS_HEADER_TABLE_SIZE. */
+			/* above the advertised limit is a decoding error, and would let the peer grow the table unbounded */
 			if (new_size > HPACK_MAX_DYNAMIC_TABLE_SIZE) {
 				return -1;
 			}

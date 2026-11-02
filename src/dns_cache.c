@@ -81,7 +81,7 @@ int dns_cache_init(int size, int mem_size, dns_cache_callback timeout_callback)
 		tlog(TLOG_ERROR, "init dns cache failed, alloc hash table failed, bits = %d", bits);
 		return -1;
 	}
-    atomic_set(&dns_cache_head.num, 0);
+	atomic_set(&dns_cache_head.num, 0);
 	atomic_set(&dns_cache_head.mem_size, 0);
 	dns_cache_head.size = size;
 	dns_cache_head.max_mem_size = mem_size;
@@ -534,10 +534,6 @@ int dns_cache_insert(struct dns_cache_key *cache_key, int rcode, int ttl, int sp
 
 int dns_cache_update_timer(struct dns_cache_key *key, int timeout)
 {
-	if (dns_cache_head.size <= 0) {
-		return -1;
-	}
-
 	int ret = -1;
 	struct dns_cache *dns_cache = NULL;
 
@@ -949,7 +945,7 @@ int dns_cache_save(const char *file, int check_lock)
 		pthread_mutex_unlock(&dns_cache_head.lock);
 	}
 
-	fd = open(file, O_TRUNC | O_CREAT | O_WRONLY, 0644);
+	fd = open(file, O_TRUNC | O_CREAT | O_WRONLY, 0640);
 	if (fd < 0) {
 		tlog(TLOG_ERROR, "create file %s failed, %s", file, strerror(errno));
 		goto errout;
