@@ -104,20 +104,20 @@ jobs:
           fi
           make
           cd /workdir/zlib
-          LDSHARED="gcc -shared -Wl,-soname,libz.so.1,--version-script,zlib.map -Wl,--undefined-version" ./configure
+          LDSHARED="gcc -shared -Wl,-soname,libz.so.1,--version-script,zlib.map -Wl,-s,--undefined-version" ./configure
           make clean && make
           cp ./libz.so.1.* ../libz.so.1
           cd /workdir
           if [ "$GOARCH" == "armv7" ] ;then
             export CFLAGS="-O2 -fPIC -ffunction-sections -fdata-sections -fomit-frame-pointer -fno-unwind-tables -fno-asynchronous-unwind-tables -I/workdir/openssl/include -Wno-error=date-time -I/workdir/zlib -DWITH_ZLIB"
-            export LDFLAGS="-L /workdir/openssl -L /workdir/jemalloc/lib -ljemalloc -L /workdir/zlib -lz -Wl,-z,nocopyreloc"
+            export LDFLAGS="-L /workdir/openssl -L /workdir/jemalloc/lib -ljemalloc -L /workdir/zlib -lz -Wl,-s,-z,nocopyreloc"
           else
             export CFLAGS="-O2 -fPIC -flto -ffunction-sections -fdata-sections -fomit-frame-pointer -fno-unwind-tables -fno-asynchronous-unwind-tables -I/workdir/openssl/include -Wno-error=date-time -I/workdir/zlib -DWITH_ZLIB"
-            export LDFLAGS="-L /workdir/openssl -L /workdir/jemalloc/lib -ljemalloc -L /workdir/zlib -lz -Wl,-z,nocopyreloc -flto"
+            export LDFLAGS="-L /workdir/openssl -L /workdir/jemalloc/lib -ljemalloc -L /workdir/zlib -lz -Wl,-s,-z,nocopyreloc -flto"
           fi
           make -C /workdir clean
           make -C /workdir all -j$(nproc) VER=${{needs.get-version.outputs.CUR_VERSION}}-canary
-          strip -d /workdir/src/smartdns || true
+          #zig objcopy --strip-all /workdir/src/smartdns || true
           EOF
           docker run -i --rm -v ${{ github.workspace }}:/workdir alpine:3.24 sh /workdir/docker-openssl.sh
       - name: build-nextjs
@@ -215,21 +215,21 @@ jobs:
           cd /workdir
           if [ "$GOARCH" == "armv7" ] ;then
             export CFLAGS="-O2 -fPIC -ffunction-sections -fdata-sections -fomit-frame-pointer -fno-unwind-tables -fno-asynchronous-unwind-tables -I/workdir/openssl/include -Wno-error=date-time -I/workdir/zlib -DWITH_ZLIB"
-            export LDFLAGS="-L /workdir/openssl -L /workdir/zlib -lz -Wl,-z,nocopyreloc"
+            export LDFLAGS="-L /workdir/openssl -L /workdir/zlib -lz -Wl,-s,-z,nocopyreloc"
           else
             export CFLAGS="-O2 -fPIC -flto -ffunction-sections -fdata-sections -fomit-frame-pointer -fno-unwind-tables -fno-asynchronous-unwind-tables -I/workdir/openssl/include -Wno-error=date-time -I/workdir/zlib -DWITH_ZLIB"
-            export LDFLAGS="-L /workdir/openssl -L /workdir/zlib -lz -Wl,-z,nocopyreloc -flto"
+            export LDFLAGS="-L /workdir/openssl -L /workdir/zlib -lz -Wl,-s,-z,nocopyreloc -flto"
           fi
           make -C /workdir clean
           make -C /workdir all -j$(nproc) VER=${{needs.get-version.outputs.CUR_VERSION}}-canary
-          strip -d /workdir/src/smartdns || true
+          #zig objcopy --strip-all /workdir/src/smartdns || true
           EOF
           docker run -i --rm -v ${{ github.workspace }}:/workdir alpine:3.24 sh /workdir/docker-openssl.sh
       - name: release ipk
         run: |
           cd ${{ github.workspace }}/package/openwrt
           chmod +x make_openwrt_withui.sh
-          docker run -i --rm -v ${{ github.workspace }}:/workdir alpine:3 sh -c "apk update && apk add tar && /workdir/package/openwrt/make_openwrt_withui.sh -o /workdir/build --arch all --filearch $GOARCH --ver ${{needs.get-version.outputs.CUR_VERSION}}"
+          docker run -i --rm -v ${{ github.workspace }}:/workdir alpine:3 sh -c "apk update && apk add tar && /workdir/package/openwrt/make_openwrt_withui.sh -o /workdir/build --arch all --filearch $GOARCH-canary --ver ${{needs.get-version.outputs.CUR_VERSION}}"
       - name: general tag and release ipk
         id: tag
         run: |
