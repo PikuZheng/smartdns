@@ -11,7 +11,7 @@ jobs:
 
     steps:
       - name: fetch upstream
-        uses: tgymnich/fork-sync@v2.0.10
+        uses: tgymnich/fork-sync@v1.3
         with:
           owner: pymumu
           base: master
