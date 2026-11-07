@@ -1,4 +1,5 @@
 name: fetch upstream 
+
 on:
   schedule:
     - cron: '0 */4 * * *'
@@ -10,14 +11,18 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: fetch upstream
-        uses: tgymnich/fork-sync@v1.3
+      - name: Checkout target repo
+        uses: actions/checkout@v3
         with:
-          owner: pymumu
-          base: master
-          head: master
-          auto_approve: true
-          token: ${{ secrets.TOKEN }}
+          ref:  master
+          persist-credentials: false
+      - name: fetch upstream
+        uses: aormsby/Fork-Sync-With-Upstream-action@v3.4.3
+        with:
+          target_sync_branch: master
+          target_repo_token: ${{ secrets.TOKEN }}
+          upstream_sync_branch: master
+          upstream_sync_repo: pymumu/smartdns
 
       - name: Delete workflow runs
         uses: Mattraks/delete-workflow-runs@v2

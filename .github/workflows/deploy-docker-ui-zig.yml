@@ -118,7 +118,7 @@ jobs:
             export LDFLAGS="-L /workdir/openssl -L /workdir/jemalloc/lib -ljemalloc -L /workdir/zlib -lz -Wl,-s,-z,nocopyreloc -flto"
           fi
           make -C /workdir clean
-          make -C /workdir all -j$(nproc) VER=${{needs.get-version.outputs.CUR_VERSION}}
+          make -C /workdir all -j$(nproc) VER=${{needs.get-version.outputs.CUR_VERSION}} EXTRA_CFLAGS="-UHAVE_UNWIND_BACKTRACE"
           EOF
           docker run -i --rm -v ${{ github.workspace }}:/workdir alpine:3 sh /workdir/docker-openssl.sh
       - name: build-nextjs
@@ -222,7 +222,7 @@ jobs:
             export LDFLAGS="-L /workdir/openssl -L /workdir/zlib -lz -Wl,-s,-z,nocopyreloc -flto"
           fi
           make -C /workdir clean
-          make -C /workdir all -j$(nproc) VER=${{needs.get-version.outputs.CUR_VERSION}}
+          make -C /workdir all -j$(nproc) VER=${{needs.get-version.outputs.CUR_VERSION}} EXTRA_CFLAGS="-UHAVE_UNWIND_BACKTRACE"
           EOF
           docker run -i --rm -v ${{ github.workspace }}:/workdir alpine:3 sh /workdir/docker-openssl.sh
       - name: release ipk
