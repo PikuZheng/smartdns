@@ -423,13 +423,7 @@ impl DataStats {
                 now.saturating_sub(self.conf.read().unwrap().max_log_age_ms as u64),
             );
         if let Err(e) = ret {
-            if e.to_string() != "Query returned no rows" {
-              dns_log!(
-                LogLevel::WARN,
-                "delete domain before timestamp error: {}",
-                e
-              );
-            }
+            dns_log!(LogLevel::WARN, "delete domain before timestamp error: {}", e);
         }
 
         let _ = self
