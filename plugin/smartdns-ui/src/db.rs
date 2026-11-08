@@ -23,6 +23,7 @@ use crate::utils;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::vec;
 
@@ -32,6 +33,7 @@ use rusqlite::{Connection, OpenFlags, Result};
 
 pub struct DB {
     conn: Mutex<Option<Connection>>,
+    pending_checkpoint: AtomicBool,
     version: i32,
     query_plan: bool,
 }
@@ -204,6 +206,7 @@ impl DB {
     pub fn new() -> Self {
         DB {
             conn: Mutex::new(None),
+            pending_checkpoint: AtomicBool::new(false),
             version: 10000, /* x: major version, xx: minor version, xx: patch version */
             query_plan: std::env::var("SMARTDNS_DEBUG_SQL").is_ok(),
         }
@@ -405,7 +408,23 @@ impl DB {
         conn.as_ref()
             .unwrap()
             .query_row("PRAGMA wal_autocheckpoint = 1000", [], |_| Ok(()))?;
+        conn.as_ref()
+            .unwrap()
+            .query_row("PRAGMA journal_size_limit = 65536", [], |_| Ok(()))?;
         Ok(())
+    }
+
+    fn checkpoint_wal(conn: &Connection, truncate: bool) -> Result<bool, Box<dyn Error>> {
+        let sql = if truncate {
+            "PRAGMA wal_checkpoint(TRUNCATE)"
+        } else {
+            "PRAGMA wal_checkpoint(PASSIVE)"
+        };
+        let (busy, log, checkpointed): (i64, i64, i64) =
+            conn.query_row(sql, [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
+        // A short-lived HTTP reader only defers the checkpoint, SQLite keeps
+        // the truncation pending in the WAL until a checkpoint succeeds.
+        Ok(busy == 0 && log >= 0 && log == checkpointed)
     }
 
     pub fn run_vacuum(&self, pages: Option<u32>) -> Result<(), Box<dyn Error>> {
@@ -417,15 +436,40 @@ impl DB {
         let conn = conn.as_ref().unwrap();
         dns_log!(LogLevel::DEBUG, "Start incremental vacuum");
 
-        conn.query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |_| Ok(()))?;
-        let vacuum_sql = if let Some(pages) = pages {
-            format!("PRAGMA incremental_vacuum({})", pages)
-        } else {
-            "PRAGMA incremental_vacuum".to_string()
-        };
+        let freelist: u32 = conn.query_row("PRAGMA freelist_count", [], |row| row.get(0))?;
+        let mut to_reclaim = pages.unwrap_or(freelist).min(freelist);
 
-        conn.query_row(&vacuum_sql, [], |_| Ok(()))?;
-        conn.execute("PRAGMA shrink_memory", [])?;
+        // One large transaction leaves the whole WAL pending when a reader
+        // keeps TRUNCATE busy. Small transactions keep the WAL low instead.
+        const BATCH_PAGES: u32 = 200;
+        let mut reclaimed = 0;
+        while to_reclaim > 0 {
+            let batch = to_reclaim.min(BATCH_PAGES);
+            let vacuum_sql = format!("PRAGMA incremental_vacuum({})", batch);
+            let mut stmt = conn.prepare(vacuum_sql.as_str())?;
+            let rows = stmt.query_map([], |_row| Ok(()));
+            if let Ok(rows) = rows {
+                for _row in rows {
+                    reclaimed += 1;
+                }
+            }
+            to_reclaim -= batch;
+        }
+
+        dns_log!(
+            LogLevel::DEBUG,
+            "Incremental vacuum reclaimed {} pages",
+            reclaimed
+        );
+
+        let done = Self::checkpoint_wal(conn, true)?;
+        self.pending_checkpoint.store(!done, Ordering::Relaxed);
+        if !done {
+            dns_log!(
+                LogLevel::DEBUG,
+                "WAL checkpoint deferred, queued for the next write transaction"
+            );
+        }
         Ok(())
     }
 
@@ -680,6 +724,16 @@ impl DB {
         self.update_domain_daily_count(&tx, &daily_count)?;
 
         tx.commit()?;
+
+        // The hourly vacuum may have left a truncation pending because a
+        // reader kept TRUNCATE busy. One checkpoint here commits it as soon
+        // as that short-lived reader is gone; no retry loop, no extra writes.
+        if self.pending_checkpoint.load(Ordering::Relaxed) {
+            if !Self::checkpoint_wal(conn, false)? {
+                dns_log!(LogLevel::DEBUG, "WAL checkpoint still deferred");
+            }
+            self.pending_checkpoint.store(false, Ordering::Relaxed);
+        }
 
         Ok(())
     }
@@ -997,7 +1051,7 @@ impl DB {
             Ok(ret.unwrap() as u64)
         };
 
-        self.run_vacuum(Some(50000))?;
+        self.run_vacuum(Some(5000))?;
 
         ret
     }
