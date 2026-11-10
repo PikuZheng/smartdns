@@ -134,6 +134,10 @@ jobs:
           export OPENSSL_LIB_DIR="/workdir/openssl"
           export OPENSSL_INCLUDE_DIR="/workdir/openssl/include"
           export RUSTFLAGS='-C link-arg=-Wl,-rpath,./ -C target-feature=-crt-static'
+          export CARGO_PROFILE_RELEASE_OPT_LEVEL=s
+          export CARGO_PROFILE_RELEASE_STRIP=true
+          export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
+          export CARGO_PROFILE_RELEASE_PANIC=abort
           if  test "$GOARCH" = "armv7" ;then
             apt update && apt install -y software-properties-common
             add-apt-repository -y universe && add-apt-repository -y multiverse
@@ -145,6 +149,7 @@ jobs:
             cp /usr/local/musl/armv7-unknown-linux-musleabihf/lib/libgcc_s.so.1 ./
             cp /usr/local/musl/armv7-unknown-linux-musleabihf/lib/libstdc++.so.6 ./
           else
+            export CARGO_PROFILE_RELEASE_LTO=true
             cargo build --release --target=$GOARCH-unknown-linux-musl
             cp ./target/$GOARCH-unknown-linux-musl/release/libsmartdns_ui.so ./
             cp /usr/local/musl/$GOARCH-unknown-linux-musl/lib/libgcc_s.so.1 ./
