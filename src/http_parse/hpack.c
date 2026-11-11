@@ -442,8 +442,6 @@ void hpack_init_context(struct hpack_context *hpack)
 	hpack->dynamic_table_size = 0;
 	hpack->max_dynamic_table_size = 65536; /* Default size */
 	hpack->entry_count = 0;
-	hpack->pending_size_update = 0;
-	hpack->pending_min_size = hpack->pending_final_size = 0;
 }
 
 void hpack_free_context(struct hpack_context *hpack)
@@ -597,7 +595,7 @@ static int hpack_find_index(struct hpack_context *hpack, const char *name, const
 
 /* HPACK encoding */
 
-static int hpack_encode_field(struct hpack_context *hpack, const char *name, const char *value, uint8_t *buf, int buf_size)
+int hpack_encode_header(struct hpack_context *hpack, const char *name, const char *value, uint8_t *buf, int buf_size)
 {
 	int index, name_only_index;
 	int offset = 0;
@@ -636,7 +634,7 @@ static int hpack_encode_field(struct hpack_context *hpack, const char *name, con
 		}
 		offset += ret;
 
-		if (hpack_add_dynamic_entry(hpack, name, value) < 0) return -1;
+		hpack_add_dynamic_entry(hpack, name, value);
 		return offset;
 	}
 
@@ -658,39 +656,11 @@ static int hpack_encode_field(struct hpack_context *hpack, const char *name, con
 	}
 	offset += ret;
 
-	if (hpack_add_dynamic_entry(hpack, name, value) < 0) return -1;
+	hpack_add_dynamic_entry(hpack, name, value);
 	return offset;
 }
 
-void hpack_set_encoder_table_size(struct hpack_context *hpack, size_t new_size)
-{
-	if (new_size == hpack->max_dynamic_table_size) return;
-	if (!hpack->pending_size_update || new_size < hpack->pending_min_size)
-		hpack->pending_min_size = new_size;
-	hpack->pending_final_size = new_size;
-	hpack->pending_size_update = 1;
-	hpack_resize_dynamic_table(hpack, new_size);
-}
-
-int hpack_encode_header(struct hpack_context *hpack, const char *name, const char *value, uint8_t *buf, int buf_size)
-{
-	int offset = 0;
-	if (hpack->pending_size_update) {
-		size_t sizes[] = {hpack->pending_min_size, hpack->pending_final_size};
-		int count = sizes[0] == sizes[1] ? 1 : 2;
-		for (int i = 0; i < count; i++) {
-			if (offset >= buf_size) return -1;
-			buf[offset] = 0x20;
-			int ret = hpack_encode_integer(sizes[i], 5, buf + offset, buf_size - offset);
-			if (ret < 0) return -1;
-			offset += ret;
-		}
-	}
-	int ret = hpack_encode_field(hpack, name, value, buf + offset, buf_size - offset);
-	if (ret < 0) return -1;
-	hpack->pending_size_update = 0;
-	return offset + ret;
-}
+/* HPACK decoding */
 
 void hpack_resize_dynamic_table(struct hpack_context *hpack, size_t new_size)
 {
@@ -787,10 +757,8 @@ int hpack_decode_headers(struct hpack_context *hpack, const uint8_t *data, int d
 			offset += ret;
 			value = allocated_value;
 
-			if (name && value && hpack_add_dynamic_entry(hpack, name, value) < 0) {
-				free(allocated_name);
-				free(allocated_value);
-				return -1;
+			if (name && value) {
+				hpack_add_dynamic_entry(hpack, name, value);
 			}
 			header_field_seen = 1;
 		} else if ((data[offset] & 0x20) != 0) {
