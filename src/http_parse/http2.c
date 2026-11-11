@@ -328,6 +328,9 @@ static int _http2_append_header_block(struct http2_ctx *ctx, const uint8_t *data
 		return -1;
 	}
 
+	/* Local resource-protection limit (advertised to the peer via
+	 * SETTINGS_MAX_HEADER_LIST_SIZE): reject header blocks that would exceed
+	 * HTTP2_MAX_HEADER_BLOCK_SIZE, guarding against decompression/header DoS. */
 	if (ctx->header_block_len > HTTP2_MAX_HEADER_BLOCK_SIZE - len) {
 		return -1;
 	}
@@ -694,6 +697,13 @@ static int _http2_send_settings(struct http2_ctx *ctx, int ack)
 		write_uint32(frame + offset + 2, HTTP2_DEFAULT_MAX_FRAME_SIZE);
 		offset += 6;
 
+		/* SETTINGS_MAX_HEADER_LIST_SIZE: advertise the local resource limit so the
+		 * peer can avoid sending header blocks larger than we are prepared to accept
+		 * (HTTP2_MAX_HEADER_BLOCK_SIZE, see _http2_append_header_block). */
+		write_uint32(frame + offset, (HTTP2_SETTINGS_MAX_HEADER_LIST_SIZE << 16) | 0);
+		write_uint32(frame + offset + 2, HTTP2_MAX_HEADER_BLOCK_SIZE);
+		offset += 6;
+
 		if (ctx->settings.max_concurrent_streams > 0) {
 			/* SETTINGS_MAX_CONCURRENT_STREAMS */
 			write_uint32(frame + offset, (HTTP2_SETTINGS_MAX_CONCURRENT_STREAMS << 16) | 0);
@@ -721,17 +731,27 @@ static int _http2_send_goaway(struct http2_ctx *ctx, uint32_t last_stream_id, ui
 {
 	uint8_t frame[HTTP2_FRAME_HEADER_SIZE + 8 + 256];
 	int offset = HTTP2_FRAME_HEADER_SIZE;
+	int payload_len;
 
 	write_uint32(frame + offset, last_stream_id & 0x7FFFFFFF);
 	write_uint32(frame + offset + 4, error_code);
 	if (debug_len > 0 && debug_len <= 256) {
 		memcpy(frame + offset + 8, debug_data, debug_len);
+		payload_len = 8 + debug_len;
 	} else {
-		debug_len = 0;
+		payload_len = 8;
 	}
 
-	_http2_write_frame_header(frame, 8 + debug_len, HTTP2_FRAME_GOAWAY, 0, 0);
-	return _http2_send_frame(ctx, frame, HTTP2_FRAME_HEADER_SIZE + 8 + debug_len);
+	_http2_write_frame_header(frame, payload_len, HTTP2_FRAME_GOAWAY, 0, 0);
+
+	/* Best effort: write the GOAWAY once without queuing it. The connection is torn
+	 * down immediately after a connection error, so a transient EAGAIN just drops the
+	 * frame rather than leaving it "queued but never flushed" (RFC 9113 Section 5.4.1
+	 * only SHOULDs sending GOAWAY; it is not a precondition for closing). */
+	pthread_mutex_lock(&ctx->mutex);
+	ctx->bio_write(ctx->private_data, frame, HTTP2_FRAME_HEADER_SIZE + payload_len);
+	pthread_mutex_unlock(&ctx->mutex);
+	return 0;
 }
 
 static int _http2_send_data_frame(struct http2_ctx *ctx, uint32_t stream_id, const uint8_t *data, int len,
@@ -773,6 +793,14 @@ static int _http2_send_headers_frame(struct http2_ctx *ctx, uint32_t stream_id, 
 	if (end_headers) {
 		flags |= HTTP2_FLAG_END_HEADERS;
 	}
+
+	/* Signal a pending dynamic table size change at the start of the header block
+	 * (RFC 7541 Section 4.2). */
+	int size_update_len = hpack_encode_table_size_update(&ctx->encoder, header_block, header_block_size);
+	if (size_update_len < 0) {
+		goto cleanup;
+	}
+	header_block_len = size_update_len;
 
 	/* Encode headers */
 	list_for_each_entry(field, &stream->header_list.list, list)
@@ -1196,11 +1224,18 @@ static int _http2_process_data_frame(struct http2_ctx *ctx, int stream_id, const
 		return -1;
 	}
 
-	/* Check flow control */
-	if (len > stream->recv_window_size || len > ctx->recv_conn_window_size) {
-		http2_send_rst_stream(ctx, stream_id, HTTP2_RST_FLOW_CONTROL_ERROR);
+	/* Check flow control (RFC 9113 Section 5.2): exceeding the connection-level
+	 * window is a connection error, while exceeding the stream-level window is a
+	 * stream error. */
+	if (len > ctx->recv_conn_window_size) {
+		_http2_send_goaway(ctx, 0, HTTP2_RST_FLOW_CONTROL_ERROR, NULL, 0);
 		ctx->status = HTTP2_ERR_PROTOCOL;
 		return -1;
+	}
+	if (len > stream->recv_window_size) {
+		http2_send_rst_stream(ctx, stream_id, HTTP2_RST_FLOW_CONTROL_ERROR);
+		_http2_mark_stream_reset(stream);
+		return 0;
 	}
 
 	/* Append to body buffer */
@@ -1384,7 +1419,11 @@ static int _http2_process_headers_frame(struct http2_ctx *ctx, int stream_id, co
 	if (ctx->header_block_len > 0) {
 		if (hpack_decode_headers(&ctx->decoder, ctx->header_block_buffer, ctx->header_block_len, _http2_on_header,
 								 stream) < 0) {
-			http2_send_rst_stream(ctx, stream_id, HTTP2_RST_COMPRESSION_ERROR);
+			/* RFC 9113 Section 4.3: an invalid HPACK representation (including a dynamic
+			 * table size update above the advertised limit) is a connection error, so
+			 * signal GOAWAY rather than a stream-local RST_STREAM. */
+			_http2_send_goaway(ctx, 0, HTTP2_RST_COMPRESSION_ERROR, NULL, 0);
+			ctx->status = HTTP2_ERR_PROTOCOL;
 			_http2_clear_continuation(ctx);
 			if (use_tmp_stream) {
 				_http2_free_tmp_stream(&tmp_stream);
@@ -1458,7 +1497,15 @@ static int _http2_process_settings_frame(struct http2_ctx *ctx, const uint8_t *d
 			if (value > HTTP2_MAX_HEADER_TABLE_SIZE) {
 				value = HTTP2_MAX_HEADER_TABLE_SIZE;
 			}
-			hpack_resize_dynamic_table(&ctx->encoder, value);
+			if (value != ctx->encoder.max_dynamic_table_size) {
+				/* Track the shrink so the next header block signals the decoder to
+				 * evict the same entries the encoder evicted (RFC 7541 Section 4.2). */
+				if (value < ctx->encoder.min_dynamic_table_size) {
+					ctx->encoder.min_dynamic_table_size = value;
+				}
+				hpack_resize_dynamic_table(&ctx->encoder, value);
+				ctx->encoder.table_size_update_pending = 1;
+			}
 			break;
 		case HTTP2_SETTINGS_ENABLE_PUSH:
 			if (value > 1) {
@@ -1973,6 +2020,7 @@ static void _http2_ctx_init_common(struct http2_ctx *ctx, const struct http2_ctx
 	 * from the peer is 4096 until explicitly updated by the peer's SETTINGS
 	 * frame (processed in _http2_process_settings_frame). */
 	ctx->encoder.max_dynamic_table_size = HTTP2_INITIAL_HEADER_TABLE_SIZE;
+	ctx->encoder.min_dynamic_table_size = HTTP2_INITIAL_HEADER_TABLE_SIZE;
 
 	hash_init(ctx->stream_map);
 	INIT_LIST_HEAD(&ctx->streams);

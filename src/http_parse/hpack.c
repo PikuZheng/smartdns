@@ -441,7 +441,9 @@ void hpack_init_context(struct hpack_context *hpack)
 	hpack->dynamic_table = NULL;
 	hpack->dynamic_table_size = 0;
 	hpack->max_dynamic_table_size = 65536; /* Default size */
+	hpack->min_dynamic_table_size = hpack->max_dynamic_table_size;
 	hpack->entry_count = 0;
+	hpack->table_size_update_pending = 0;
 }
 
 void hpack_free_context(struct hpack_context *hpack)
@@ -595,6 +597,24 @@ static int hpack_find_index(struct hpack_context *hpack, const char *name, const
 
 /* HPACK encoding */
 
+/* Encode a single Dynamic Table Size Update (001 prefix + 5-bit integer, RFC 7541 Section 6.3). */
+static int hpack_encode_size_update(size_t size, uint8_t *buf, size_t buf_size)
+{
+	int ret;
+
+	if (buf_size < 1) {
+		return -1;
+	}
+
+	buf[0] = 0x20;
+	ret = hpack_encode_integer(size, 5, buf, buf_size);
+	if (ret < 0) {
+		return -1;
+	}
+
+	return ret;
+}
+
 int hpack_encode_header(struct hpack_context *hpack, const char *name, const char *value, uint8_t *buf, int buf_size)
 {
 	int index, name_only_index;
@@ -688,6 +708,40 @@ void hpack_resize_dynamic_table(struct hpack_context *hpack, size_t new_size)
 		free(last->value);
 		free(last);
 	}
+}
+
+int hpack_encode_table_size_update(struct hpack_context *hpack, uint8_t *buf, int buf_size)
+{
+	int offset = 0;
+	int ret;
+
+	if (!hpack->table_size_update_pending) {
+		return 0;
+	}
+
+	if (buf_size < 1) {
+		return -1;
+	}
+
+	/* Signal the shrink first to force the decoder to evict the same entries the
+	 * encoder evicted, then the final (possibly grown) size (RFC 7541 Section 4.2). */
+	ret = hpack_encode_size_update(hpack->min_dynamic_table_size, buf, (size_t)buf_size);
+	if (ret < 0) {
+		return -1;
+	}
+	offset = ret;
+
+	if (hpack->min_dynamic_table_size < hpack->max_dynamic_table_size) {
+		ret = hpack_encode_size_update(hpack->max_dynamic_table_size, buf + offset, (size_t)(buf_size - offset));
+		if (ret < 0) {
+			return -1;
+		}
+		offset += ret;
+	}
+
+	hpack->table_size_update_pending = 0;
+	hpack->min_dynamic_table_size = hpack->max_dynamic_table_size;
+	return offset;
 }
 
 int hpack_decode_headers(struct hpack_context *hpack, const uint8_t *data, int data_len, hpack_on_header_fn on_header,

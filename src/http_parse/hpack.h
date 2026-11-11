@@ -25,7 +25,9 @@ struct hpack_context {
 	struct hpack_dynamic_entry *dynamic_table;
 	size_t dynamic_table_size;
 	size_t max_dynamic_table_size;
+	size_t min_dynamic_table_size; /* Minimum max size seen, to force decoder eviction */
 	int entry_count;
+	int table_size_update_pending; /* A dynamic table size change must be signaled */
 };
 
 /* Callback function for decoded headers */
@@ -49,6 +51,17 @@ void hpack_free_context(struct hpack_context *hpack);
  * @param new_size New size
  */
 void hpack_resize_dynamic_table(struct hpack_context *hpack, size_t new_size);
+
+/**
+ * Encode a pending Dynamic Table Size Update (RFC 7541 Section 4.2 and 6.3).
+ * Signals both the shrink (to force the decoder to evict) and the final size.
+ * Emits nothing and returns 0 when no size change is pending.
+ * @param hpack HPACK context (encoder)
+ * @param buf Output buffer
+ * @param buf_size Output buffer size
+ * @return Number of bytes written, 0 if none, or -1 on error
+ */
+int hpack_encode_table_size_update(struct hpack_context *hpack, uint8_t *buf, int buf_size);
 
 /**
  * Encode a header
