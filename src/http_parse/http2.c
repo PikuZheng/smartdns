@@ -130,6 +130,7 @@ struct http2_stream {
 	int end_stream_received;
 	int reset_received;
 	int end_stream_sent;
+	int headers_sent;            /* HEADERS frame was actually transmitted on this stream */
 	int end_stream_read_handled; /* Flag to track if EOF has been reported to app */
 	int accepted;                /* Flag to track if stream has been accepted by app */
 	int send_window_size;
@@ -898,6 +899,7 @@ static struct http2_stream *_http2_create_stream(struct http2_ctx *ctx, uint32_t
 	stream->refcount = 0; /* Initial reference count */
 	stream->stream_id = stream_id;
 	stream->state = HTTP2_STREAM_IDLE;
+	stream->headers_sent = 0;
 
 	/* Determine if stream is accepted (locally initiated) or needs accept (peer initiated) */
 	if (ctx->is_client) {
@@ -1820,12 +1822,17 @@ static int _http2_process_frames(struct http2_ctx *ctx)
 			/* Close the stream */
 			{
 				struct http2_stream *rst_stream = _http2_find_stream(ctx, stream_id);
-				if (rst_stream) {
-                    /* A reset cannot invalidate a response already completed by END_STREAM. */
-                    if (!ctx->is_client || !rst_stream->end_stream_received)
-                        __atomic_store_n(&rst_stream->reset_received, 1, __ATOMIC_RELEASE);
-					rst_stream->state = HTTP2_STREAM_CLOSED;
+				/* RFC 9113 Section 6.4: a RST_STREAM for an idle or unknown stream
+				 * is a connection error of type PROTOCOL_ERROR. */
+				if (!rst_stream || rst_stream->state == HTTP2_STREAM_IDLE) {
+					_http2_send_goaway(ctx, 0, HTTP2_RST_PROTOCOL_ERROR, NULL, 0);
+					ctx->status = HTTP2_ERR_PROTOCOL;
+					return HTTP2_ERR_PROTOCOL;
 				}
+                /* A reset cannot invalidate a response already completed by END_STREAM. */
+                if (!ctx->is_client || !rst_stream->end_stream_received)
+                    __atomic_store_n(&rst_stream->reset_received, 1, __ATOMIC_RELEASE);
+				rst_stream->state = HTTP2_STREAM_CLOSED;
 			}
 			break;
 		case HTTP2_FRAME_GOAWAY:
@@ -2367,10 +2374,13 @@ void http2_stream_close(struct http2_stream *stream)
 			}
 		}
 
+		/* A RST_STREAM MUST NOT be sent for a stream that was never opened on the
+		 * wire (RFC 9113 Section 6.4). Compute this before marking the stream closed. */
+		int send_rst = ctx->status >= 0 && stream->headers_sent &&
+			!(stream->end_stream_sent && stream->end_stream_received);
 		/* Mark stream as closed */
 		stream->state = HTTP2_STREAM_CLOSED;
 		stream->ex_data = NULL;
-		int send_rst = ctx->status >= 0 && !(stream->end_stream_sent && stream->end_stream_received);
 		if (send_rst) {
 			http2_send_rst_stream(ctx, stream->stream_id, 0); /* NO_ERROR */
 		}
@@ -2483,12 +2493,14 @@ int http2_stream_set_request(struct http2_stream *stream, const char *method, co
 	int end_stream = (strcmp(method, "GET") == 0 || strcmp(method, "HEAD") == 0) ? 1 : 0;
 	int ret = _http2_send_headers_frame(ctx, stream->stream_id, stream, end_stream, 1);
 
-	if (end_stream) {
-		stream->end_stream_sent = 1;
-	}
-
-	if (stream->state == HTTP2_STREAM_IDLE) {
-		stream->state = HTTP2_STREAM_OPEN;
+	if (ret == 0) {
+		if (end_stream) {
+			stream->end_stream_sent = 1;
+		}
+		if (stream->state == HTTP2_STREAM_IDLE) {
+			stream->state = HTTP2_STREAM_OPEN;
+		}
+		stream->headers_sent = 1;
 	}
 
 	pthread_mutex_unlock(&ctx->mutex);
@@ -2529,6 +2541,10 @@ int http2_stream_set_response(struct http2_stream *stream, int status, const str
 
 	/* Send HEADERS frame */
 	int ret = _http2_send_headers_frame(ctx, stream->stream_id, stream, 0, 1);
+
+	if (ret == 0) {
+		stream->headers_sent = 1;
+	}
 
 	pthread_mutex_unlock(&ctx->mutex);
 	return ret;
