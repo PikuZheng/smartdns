@@ -32,6 +32,7 @@ struct dns_server_conn_http2_stream {
 	struct dns_server_conn_head head;
 	struct http2_stream *stream;
 	struct dns_server_conn_tls_client *tls_client;
+	struct http2_ctx *ctx;
 };
 
 int _dns_server_process_http2(struct dns_server_conn_tls_client *tls_client, struct epoll_event *event,

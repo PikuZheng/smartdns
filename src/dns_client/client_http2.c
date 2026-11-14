@@ -869,12 +869,6 @@ int _dns_client_process_http2(struct dns_server_info *server_info, struct epoll_
 {
 	int ret = -1;
 
-	if (server_info->http2_ctx == NULL) {
-		if (_dns_client_http2_init_ctx(server_info) < 0) {
-			return -1;
-		}
-	}
-
 	/*
 	 * Guard the whole read/write cycle: a query callback invoked from
 	 * _dns_client_http2_process_read() (via _dns_client_recv()) may request
@@ -884,6 +878,12 @@ int _dns_client_process_http2(struct dns_server_info *server_info, struct epoll_
 	 * until the guard is released below.
 	 */
 	_dns_client_process_guard_enter(server_info);
+
+	if (server_info->http2_ctx == NULL) {
+		if (_dns_client_http2_init_ctx(server_info) < 0) {
+			goto out;
+		}
+	}
 
 	if (event->events & EPOLLOUT) {
 		if (_dns_client_http2_process_write(server_info) < 0) {

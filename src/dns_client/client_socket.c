@@ -194,7 +194,9 @@ again:
 		if (server_status == DNS_SERVER_STATUS_CONNECTED) {
 			_ssl_shutdown(server_info);
 		}
+	}
 
+		/* Buffered streams may exist before TLS is established, cleanup must not depend on ssl. */
 		if (server_info->type == DNS_SERVER_QUIC || server_info->type == DNS_SERVER_HTTP3) {
 			struct dns_conn_stream *conn_stream = NULL;
 			struct dns_conn_stream *tmp = NULL;
@@ -234,6 +236,7 @@ again:
 			}
 		}
 
+	if (server_info->ssl) {
 		SSL_free(server_info->ssl);
 		server_info->ssl = NULL;
 		server_info->ssl_write_len = -1;

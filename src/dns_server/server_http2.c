@@ -183,6 +183,7 @@ static void _dns_server_http2_process_stream(struct dns_server_conn_tls_client *
 		_dns_server_conn_head_init(&stream_conn->head, -1, DNS_CONN_TYPE_HTTP2_STREAM);
 		stream_conn->stream = http2_stream_get(stream);
 		stream_conn->tls_client = tls_client;
+		stream_conn->ctx = http2_ctx_get(tls_client->http2_ctx);
 
 		/* Copy properties from parent connection */
 		stream_conn->head.server_flags = tls_client->tcp.head.server_flags;

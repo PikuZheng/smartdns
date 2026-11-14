@@ -80,6 +80,10 @@ void _dns_server_conn_release(struct dns_server_conn_head *conn)
 			http2_stream_close(http2_stream->stream);
 			http2_stream->stream = NULL;
 		}
+		if (http2_stream->ctx != NULL) {
+			http2_ctx_put(http2_stream->ctx);
+			http2_stream->ctx = NULL;
+		}
 	}
 
 	if (conn->fd > 0) {

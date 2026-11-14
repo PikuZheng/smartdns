@@ -1925,10 +1925,14 @@ void http2_ctx_put(struct http2_ctx *ctx)
 void http2_ctx_close(struct http2_ctx *ctx)
 {
 	struct list_head streams_to_free;
+	struct http2_stream *stream, *tmp;
 
 	if (!ctx) {
 		return;
 	}
+
+	/* No bio_read/bio_write may dereference the owner once close starts. */
+	http2_ctx_disconnect(ctx);
 
 	pthread_mutex_lock(&ctx->mutex);
 
@@ -1936,10 +1940,22 @@ void http2_ctx_close(struct http2_ctx *ctx)
 	INIT_LIST_HEAD(&streams_to_free);
 	list_splice_init(&ctx->streams, &streams_to_free);
 
+	/* Detached streams can outlive the ctx on external refs; drop their buffers
+	 * under the same lock the reply path holds, so no worker walks a freed list. */
+	list_for_each_entry_safe(stream, tmp, &streams_to_free, node)
+	{
+		_http2_free_headers(stream);
+		free(stream->body_buffer);
+		stream->body_buffer = NULL;
+		stream->body_buffer_size = 0;
+		stream->body_buffer_len = 0;
+		stream->body_read_offset = 0;
+		_http2_stream_clear_pending_send(stream);
+	}
+
 	pthread_mutex_unlock(&ctx->mutex);
 
 	/* Now free streams outside the lock - just break circular references */
-	struct http2_stream *stream, *tmp;
 	list_for_each_entry_safe(stream, tmp, &streams_to_free, node)
 	{
 		_http2_remove_stream(stream, 1);
@@ -2520,6 +2536,12 @@ int http2_stream_set_response(struct http2_stream *stream, int status, const str
 	}
 
 	pthread_mutex_lock(&ctx->mutex);
+
+	if (ctx->status < 0) {
+		pthread_mutex_unlock(&ctx->mutex);
+		errno = ECONNRESET;
+		return -1;
+	}
 
 	/* Clear old headers */
 	_http2_free_headers(stream);
