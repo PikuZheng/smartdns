@@ -143,6 +143,7 @@ struct dns_server_conn_head {
 	struct list_head list;
 	time_t last_request_time;
 	atomic_t refcnt;
+	atomic_t closed;
 	const char *dns_group;
 	uint32_t server_flags;
 	struct nftset_ipset_rules *ipset_nftset_rule;
