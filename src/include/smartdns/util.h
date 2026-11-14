@@ -179,6 +179,13 @@ int has_unprivileged_ping(void);
 
 int set_sock_keepalive(int fd, int keepidle, int keepinterval, int keepcnt);
 
+/*
+ * Check whether the kernel has already declared this TCP connection dead.
+ * Returns 1 when dead, 0 when still usable or not checkable.
+ * On dead, reason_errno (if not NULL) receives the socket error.
+ */
+int tcp_connection_is_dead(int fd, int *reason_errno);
+
 int set_sock_lingertime(int fd, int time);
 
 uint64_t get_free_space(const char *path);

@@ -456,6 +456,46 @@ int set_sock_keepalive(int fd, int keepidle, int keepinterval, int keepcnt)
 	return 0;
 }
 
+int tcp_connection_is_dead(int fd, int *reason_errno)
+{
+	int err = 0;
+	socklen_t len = sizeof(err);
+
+	if (fd <= 0) {
+		return 0;
+	}
+
+	/* SO_ERROR reports the pending error set by TCP keepalive / retransmit timeout. */
+	if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &len) == 0 && err != 0 && err != EINPROGRESS) {
+		if (reason_errno) {
+			*reason_errno = err;
+		}
+		return 1;
+	}
+
+	/*
+	 * SO_ERROR is consumed by the first reader (e.g. SSL_read), so also look at
+	 * the TCP state. The first byte of struct tcp_info is tcpi_state on Linux.
+	 */
+#ifdef TCP_INFO
+	{
+		/* Linux TCP state enum: TCP_CLOSE = 7. */
+		const unsigned char tcp_state_close = 7;
+		unsigned char tcp_info[256] = {0};
+		len = sizeof(tcp_info);
+		if (getsockopt(fd, IPPROTO_TCP, TCP_INFO, tcp_info, &len) == 0 && len > 0 &&
+			tcp_info[0] == tcp_state_close) {
+			if (reason_errno) {
+				*reason_errno = ENOTCONN;
+			}
+			return 1;
+		}
+	}
+#endif
+
+	return 0;
+}
+
 int set_sock_lingertime(int fd, int time)
 {
 	struct linger l;

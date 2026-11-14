@@ -523,6 +523,18 @@ void _dns_client_check_tcp(void)
 				_dns_client_close_socket(server_info);
 			}
 		} else if (server_info->status == DNS_SERVER_STATUS_CONNECTED) {
+			int conn_errno = 0;
+			if (server_info->prohibit == 0 &&
+				(server_info->type == DNS_SERVER_TCP || server_info->type == DNS_SERVER_TLS ||
+				 server_info->type == DNS_SERVER_HTTPS) &&
+				tcp_connection_is_dead(server_info->fd, &conn_errno)) {
+				/* Reuse the existing prohibit / shutdown / cooldown / reconnect path. */
+				tlog(TLOG_WARN, "server %s:%d tcp connection is dead, %s, prohibit.", server_info->ip,
+					 server_info->port, strerror(conn_errno));
+				server_info->prohibit = 1;
+				continue;
+			}
+
 			if (server_info->last_recv + DNS_TCP_IDLE_TIMEOUT < now) {
 				/*disconnect if the server is not responding */
 				server_info->recv_buff.len = 0;
