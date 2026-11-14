@@ -572,7 +572,9 @@ errout:
 static int _dns_server_process(struct dns_server_conn_head *conn, struct epoll_event *event, unsigned long now)
 {
 	int ret = 0;
-	_dns_server_client_touch(conn);
+	if (event->events & EPOLLIN) {
+		_dns_server_client_touch(conn);
+	}
 	_dns_server_conn_get(conn);
 	if (conn->type == DNS_CONN_TYPE_UDP_SERVER) {
 		struct dns_server_conn_udp *udpconn = (struct dns_server_conn_udp *)conn;
