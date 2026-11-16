@@ -462,13 +462,19 @@ impl DB {
             reclaimed
         );
 
-        let done = Self::checkpoint_wal(conn, true)?;
-        self.pending_checkpoint.store(!done, Ordering::Relaxed);
-        if !done {
-            dns_log!(
-                LogLevel::DEBUG,
-                "WAL checkpoint deferred, queued for the next write transaction"
-            );
+        // The hourly cleanup also runs when nothing expired. Re-checkpointing
+        // an idle WAL only rewrites clean pages and keeps the file cache
+        // churning, so let wal_autocheckpoint handle that case. Still retry a
+        // TRUNCATE that a short-lived reader deferred earlier.
+        if reclaimed > 0 || self.pending_checkpoint.load(Ordering::Relaxed) {
+            let done = Self::checkpoint_wal(conn, true)?;
+            self.pending_checkpoint.store(!done, Ordering::Relaxed);
+            if !done {
+                dns_log!(
+                    LogLevel::DEBUG,
+                    "WAL checkpoint deferred, queued for the next write transaction"
+                );
+            }
         }
         Ok(())
     }
@@ -765,7 +771,12 @@ impl DB {
             return None;
         }
 
-        Some(read_conn.unwrap())
+        let read_conn = read_conn.unwrap();
+        if read_conn.execute("PRAGMA cache_size = -2048", []).is_err() {
+            return None;
+        }
+
+        Some(read_conn)
     }
 
     /// # Returns
@@ -1084,23 +1095,25 @@ impl DB {
             rusqlite::params![timestamp, timestamp_now],
         )?;
 
-        let mut client_count_list = Vec::new();
-
-        let mut stmt = tx.prepare(sql)?;
-        let rows = stmt.query_map([], |row| {
-            Ok(ClientQueryCount {
-                client_ip: row.get(0)?,
-                count: row.get(1)?,
-                timestamp_start: timestamp,
-                timestamp_end: timestamp_now,
-            })
-        })?;
-
-        for row in rows {
-            client_count_list.push(row?);
-        }
-
-        stmt.finalize()?;
+        // The SELECT below only filled client_count_list, which was never
+        // used or returned. Keep INSERT ... SELECT as the sole write.
+        // let mut client_count_list = Vec::new();
+        //
+        // let mut stmt = tx.prepare(sql)?;
+        // let rows = stmt.query_map([], |row| {
+        //     Ok(ClientQueryCount {
+        //         client_ip: row.get(0)?,
+        //         count: row.get(1)?,
+        //         timestamp_start: timestamp,
+        //         timestamp_end: timestamp_now,
+        //     })
+        // })?;
+        //
+        // for row in rows {
+        //     client_count_list.push(row?);
+        // }
+        //
+        // stmt.finalize()?;
         tx.commit()?;
 
         Ok(())
@@ -1307,22 +1320,24 @@ impl DB {
             rusqlite::params![timestamp, timestamp_now],
         )?;
 
-        let mut domain_count_list = Vec::new();
-
-        let mut stmt = tx.prepare(sql)?;
-        let rows = stmt.query_map([], |row| {
-            Ok(DomainQueryCount {
-                domain: row.get(0)?,
-                count: row.get(1)?,
-                timestamp_start: timestamp,
-                timestamp_end: timestamp_now,
-            })
-        })?;
-
-        for row in rows {
-            domain_count_list.push(row?);
-        }
-        stmt.finalize()?;
+        // The SELECT below only filled domain_count_list, which was never
+        // used or returned. Keep INSERT ... SELECT as the sole write.
+        // let mut domain_count_list = Vec::new();
+        //
+        // let mut stmt = tx.prepare(sql)?;
+        // let rows = stmt.query_map([], |row| {
+        //     Ok(DomainQueryCount {
+        //         domain: row.get(0)?,
+        //         count: row.get(1)?,
+        //         timestamp_start: timestamp,
+        //         timestamp_end: timestamp_now,
+        //     })
+        // })?;
+        //
+        // for row in rows {
+        //     domain_count_list.push(row?);
+        // }
+        // stmt.finalize()?;
         tx.commit()?;
 
         Ok(())
