@@ -432,15 +432,6 @@ impl DataStats {
             }
         }
 
-        let ret = self.db.refresh_client_top_list(now.saturating_sub(7 * 24 * 3600 * 1000));
-        if let Err(e) = ret {
-            dns_log!(LogLevel::WARN, "refresh client top list error: {}", e);
-        }
-
-        let ret = self.db.refresh_domain_top_list(now.saturating_sub(7 * 24 * 3600 * 1000));
-        if let Err(e) = ret {
-            dns_log!(LogLevel::WARN, "refresh domain top list error: {}", e);
-        }
         let _ = self
             .db
             .delete_hourly_query_count_before_timestamp(now.saturating_sub(30 * 24 * 3600 * 1000));
