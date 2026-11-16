@@ -1038,23 +1038,25 @@ impl DB {
             rusqlite::params![timestamp, timestamp_now],
         )?;
 
-        let mut client_count_list = Vec::new();
-
-        let mut stmt = tx.prepare(sql)?;
-        let rows = stmt.query_map([], |row| {
-            Ok(ClientQueryCount {
-                client_ip: row.get(0)?,
-                count: row.get(1)?,
-                timestamp_start: timestamp,
-                timestamp_end: timestamp_now,
-            })
-        })?;
-
-        for row in rows {
-            client_count_list.push(row?);
-        }
-
-        stmt.finalize()?;
+        // The SELECT below only filled client_count_list, which was never
+        // used or returned. Keep INSERT ... SELECT as the sole write.
+        // let mut client_count_list = Vec::new();
+        //
+        // let mut stmt = tx.prepare(sql)?;
+        // let rows = stmt.query_map([], |row| {
+        //     Ok(ClientQueryCount {
+        //         client_ip: row.get(0)?,
+        //         count: row.get(1)?,
+        //         timestamp_start: timestamp,
+        //         timestamp_end: timestamp_now,
+        //     })
+        // })?;
+        //
+        // for row in rows {
+        //     client_count_list.push(row?);
+        // }
+        //
+        // stmt.finalize()?;
         tx.commit()?;
 
         Ok(())
@@ -1277,22 +1279,24 @@ impl DB {
             rusqlite::params![timestamp, timestamp_now],
         )?;
 
-        let mut domain_count_list = Vec::new();
-
-        let mut stmt = tx.prepare(sql)?;
-        let rows = stmt.query_map([], |row| {
-            Ok(DomainQueryCount {
-                domain: row.get(0)?,
-                count: row.get(1)?,
-                timestamp_start: timestamp,
-                timestamp_end: timestamp_now,
-            })
-        })?;
-
-        for row in rows {
-            domain_count_list.push(row?);
-        }
-        stmt.finalize()?;
+        // The SELECT below only filled domain_count_list, which was never
+        // used or returned. Keep INSERT ... SELECT as the sole write.
+        // let mut domain_count_list = Vec::new();
+        //
+        // let mut stmt = tx.prepare(sql)?;
+        // let rows = stmt.query_map([], |row| {
+        //     Ok(DomainQueryCount {
+        //         domain: row.get(0)?,
+        //         count: row.get(1)?,
+        //         timestamp_start: timestamp,
+        //         timestamp_end: timestamp_now,
+        //     })
+        // })?;
+        //
+        // for row in rows {
+        //     domain_count_list.push(row?);
+        // }
+        // stmt.finalize()?;
         tx.commit()?;
 
         Ok(())
