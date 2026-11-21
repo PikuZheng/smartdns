@@ -110,7 +110,7 @@ jobs:
       - name: upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: build-result
+          name: $GOARCH.zip
           path: |
             ${{ github.workspace }}/build*
           retention-days: 7
