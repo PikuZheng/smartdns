@@ -112,5 +112,5 @@ jobs:
         with:
           name: build-result
           path: |
-            /workdir/build/*
+            ${{ github.workspace }}/build*
           retention-days: 7
