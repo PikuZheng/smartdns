@@ -1,0 +1,116 @@
+name: test build for feature
+on:
+  workflow_dispatch:
+
+jobs:
+  get-version:
+    name: get latest version number
+    runs-on: ubuntu-latest
+    outputs:
+      CUR_VERSION: ${{steps.get-version.outputs.CUR_VERSION}}
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        ref: VERSION_CONTROL
+        fetch-depth: 1
+        path: version_control
+    - name: get version
+      id: get-version
+      run: |
+          #获取当前版本号
+          pre_version=$(cat version_control/VERSION | grep "PREFEX" | sed 's/PREFEX=\(.*\)/\1/')
+          cur_version=$(cat version_control/VERSION | grep "CUR_VERS" | sed 's/CUR_VERS=\(.*\)/\1/')
+          echo "CUR_VERSION=$pre_version$cur_version" >> $GITHUB_OUTPUT
+
+  build: 
+    needs: get-version
+    strategy:
+      matrix:
+        goarch: [x86_64, aarch64, armv7]
+      fail-fast: false
+    runs-on: ubuntu-latest
+    env:
+      GOARCH: ${{ matrix.goarch }}
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/checkout@v3
+        with:
+          ref: BUILD-DEPENDENCIES
+          fetch-depth: 1
+          path: dependencies
+      - uses: docker/setup-qemu-action@v2
+      - uses: docker/setup-buildx-action@v2
+        with:
+          install: true
+      - name: build-dependencies
+        run: |
+          sudo timedatectl set-timezone "Asia/Shanghai"
+          cd ${{ github.workspace }}
+          mkdir -p ${{ github.workspace }}/build
+          sed -i 's/^HAS_UNWIND.*/HAS_UNWIND := 0/' ${{ github.workspace }}/src/Makefile
+          mkdir -p ${{ github.workspace }}/openssl
+          #curl -sSL https://github.com/openssl/openssl/releases/download/openssl-3.5.7/openssl-3.5.7.tar.gz -o openssl.tar.gz
+          tar -zxvf ./dependencies/openssl.tar.gz --strip-components 1 -C openssl
+          mkdir -p ${{ github.workspace }}/jemalloc
+          #curl -sSL  https://github.com/jemalloc/jemalloc/archive/refs/tags/5.3.0.tar.gz -o jemalloc.tar.gz
+          tar -zxvf ./dependencies/jemalloc.tar.gz --strip-components 1 -C jemalloc
+          mkdir -p ${{ github.workspace }}/zlib
+          #curl -fL --retry 5 --retry-all-errors --retry-delay 2 https://zlib.net/zlib-1.3.2.tar.gz -o zlib.tar.gz
+          tar -zxvf ./dependencies/zlib.tar.gz --strip-components 1 -C zlib
+          rm docker-openssl.sh || true
+          cat >> docker-openssl.sh << EOF
+          apk add perl make coreutils tar pkgconfig dpkg binutils autoconf zig
+          mkdir -p /usr/local/zig/bin
+          if [ "$GOARCH" == "armv7" ] ;then
+            printf '#!/bin/sh\nexec zig cc -target arm-linux-musleabihf "\044@"\n' > /usr/local/zig/bin/gcc
+            printf '#!/bin/sh\nexec zig c++ -target arm-linux-musleabihf "\044@"\n' > /usr/local/zig/bin/g++
+          else
+            printf '#!/bin/sh\nexec zig cc -target $GOARCH-linux-musl "\044@"\n' > /usr/local/zig/bin/gcc
+            printf '#!/bin/sh\nexec zig c++ -target $GOARCH-linux-musl "\044@"\n' > /usr/local/zig/bin/g++
+          fi
+          cp /usr/local/zig/bin/gcc /usr/local/zig/bin/cc
+          cp /usr/local/zig/bin/gcc /usr/local/zig/bin/clang
+          cp /usr/local/zig/bin/g++ /usr/local/zig/bin/c++
+          cp /usr/local/zig/bin/g++ /usr/local/zig/bin/clang++
+          printf '#!/bin/sh\nexec zig ar "\044@"\n' > /usr/local/zig/bin/ar
+          chmod +x /usr/local/zig/bin/*
+          export PATH=/usr/local/zig/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          export CC=gcc
+          cd /workdir/openssl
+          if [ "$GOARCH" == "mipsel" ] || [ "$GOARCH" == "mips" ] ;then
+            ./Configure no-tests linux-mips32
+          elif [ "$GOARCH" == "mips64el" ] || [ "$GOARCH" == "mips64" ] ;then
+            ./Configure no-tests linux-mips64
+          elif [ "$GOARCH" == "i686" ] ;then
+            ./Configure no-tests linux-x86
+          elif [ "$GOARCH" == "powerpc64le" ] ;then
+            ./Configure no-tests linux-ppc64le
+          elif [ "$GOARCH" == "armv7" ] ;then
+            ./Configure no-tests linux-armv4 enable-quic enable-ktls no-docs
+          else
+            ./Configure no-tests linux-$GOARCH enable-quic enable-ktls no-docs
+          fi
+          make clean && make all
+          cd /workdir/zlib
+          LDSHARED="gcc -shared -Wl,-soname,libz.so.1,--version-script,zlib.map -Wl,-s,--undefined-version" ./configure
+          make clean && make
+          cp ./libz.so.1.* ../libz.so.1
+          cd /workdir
+          if [ "$GOARCH" == "armv7" ] ;then
+            export CFLAGS="-O2 -fPIC -ffunction-sections -fdata-sections -fomit-frame-pointer -fno-unwind-tables -fno-asynchronous-unwind-tables -I/workdir/openssl/include -Wno-error=date-time -I/workdir/zlib -DWITH_ZLIB"
+            export LDFLAGS="-L /workdir/openssl -L /workdir/zlib -Wl,-s,-z,nocopyreloc -Wl,-Bstatic -lz"
+          else
+            export CFLAGS="-O2 -fPIC -flto -ffunction-sections -fdata-sections -fomit-frame-pointer -fno-unwind-tables -fno-asynchronous-unwind-tables -I/workdir/openssl/include -Wno-error=date-time -I/workdir/zlib -DWITH_ZLIB"
+            export LDFLAGS="-L /workdir/openssl -L /workdir/zlib -Wl,-s,-z,nocopyreloc -flto -Wl,-Bstatic -lz"
+          fi
+          ./package/build-pkg.sh --platform openwrt --arch all --filearch $GOARCH-test-static-no_ui --static --outputdir /workdir/build
+          EOF
+          sed -i "s/VER=.*/VER=${{needs.get-version.outputs.CUR_VERSION}}/" ${{ github.workspace }}/package/build-pkg.sh
+          docker run -i --rm -v ${{ github.workspace }}:/workdir alpine:3.24 sh /workdir/docker-openssl.sh
+      - name: upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-result
+          path: |
+            /workdir/build/*
+          retention-days: 7
