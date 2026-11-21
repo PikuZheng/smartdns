@@ -170,9 +170,8 @@ jobs:
           COPY ./src/smartdns /usr/sbin
           COPY ./openssl/libcrypto.so ./openssl/libssl.so ./libz.so.1 ./plugin/smartdns-ui/libsmartdns_ui.so ./plugin/smartdns-ui/libgcc_s.so.1 ./plugin/smartdns-ui/libstdc++.so.6 ./jemalloc/lib/libjemalloc.so.2 /usr/lib
           COPY ./smartdns-webui/out /wwwroot
-          RUN apk add --no-cache tzdata ca-certificates && (ldd /usr/sbin/smartdns 2>&1 | grep -q "libatomic.so" && apk add --no-cache libatomic || true)
-          RUN ln -sf /usr/lib/libssl.so /usr/lib/libssl.so.3 && ln -sf /usr/lib/libcrypto.so /usr/lib/libcrypto.so.3
-          RUN ln -sf /usr/lib/libsmartdns_ui.so /usr/lib/smartdns_ui.so
+          RUN apk --no-log add --no-cache tzdata ca-certificates && (ldd /usr/sbin/smartdns 2>&1 | grep -q "libatomic.so" && apk --no-log add --no-cache libatomic || true)
+          RUN ln -sf /usr/lib/libssl.so /usr/lib/libssl.so.3 && ln -sf /usr/lib/libcrypto.so /usr/lib/libcrypto.so.3 && ln -sf /usr/lib/libsmartdns_ui.so /usr/lib/smartdns_ui.so
           EXPOSE 53/udp 53/tcp 6080/tcp
           VOLUME "/etc/smartdns/"
           HEALTHCHECK --interval=5m --timeout=2s --start-period=5s CMD test $(nslookup dns.pub 127.0.0.1 |grep answer |wc -l) -gt 0
