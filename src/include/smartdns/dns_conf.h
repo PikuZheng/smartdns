@@ -107,6 +107,7 @@ enum domain_rule {
 enum ip_rule {
 	IP_RULE_FLAGS = 0,
 	IP_RULE_ALIAS = 1,
+	IP_RULE_CNAME = 2,
 	IP_RULE_MAX,
 };
 
@@ -640,6 +641,11 @@ struct ip_rule_flags {
 struct ip_rule_alias {
 	struct dns_ip_rule head;
 	struct dns_iplist_ip_addresses ip_alias;
+};
+
+struct ip_rule_cname {
+	struct dns_ip_rule head;
+	char cname[DNS_MAX_CNAME_LEN];
 };
 
 struct dns_ip_set_name {

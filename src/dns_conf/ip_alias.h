@@ -28,6 +28,8 @@ extern "C" {
 
 int _conf_ip_alias(const char *ip_cidr, const char *ips);
 
+int _conf_ip_cname(const char *ip_cidr, const char *cname);
+
 int _config_ip_alias(void *data, int argc, char *argv[]);
 
 #ifdef __cplusplus

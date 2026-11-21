@@ -27,6 +27,29 @@
 
 #include <math.h>
 
+static void _dns_server_clear_ip_result(struct dns_request *request)
+{
+	struct dns_ip_address *addr_map = NULL;
+	struct hlist_node *tmp = NULL;
+	unsigned long bucket = 0;
+
+	pthread_mutex_lock(&request->ip_map_lock);
+	hash_for_each_safe(request->ip_map, bucket, tmp, addr_map, node)
+	{
+		hash_del(&addr_map->node);
+		free(addr_map);
+	}
+	atomic_set(&request->ip_map_num, 0);
+	pthread_mutex_unlock(&request->ip_map_lock);
+
+	request->has_ip = 0;
+	request->has_cname = 0;
+	request->has_soa = 0;
+	request->has_ping_result = 0;
+	request->ping_time = -1;
+	request->ip_ttl = 0;
+}
+
 static int _dns_server_process_answer_A_IP(struct dns_request *request, char *cname, unsigned char addr[4], int ttl,
 										   unsigned int result_flag)
 {
@@ -35,12 +58,26 @@ static int _dns_server_process_answer_A_IP(struct dns_request *request, char *cn
 	unsigned char *paddrs[MAX_IP_NUM];
 	int paddr_num = 0;
 	struct dns_iplist_ip_addresses *alias = NULL;
+	struct ip_rule_cname *cname_rule = NULL;
+
+	if (request->ip_rule_cname_matched) {
+		return -1;
+	}
 
 	paddrs[paddr_num] = addr;
 	paddr_num = 1;
 
 	/* ip rule check */
-	ip_check_result = _dns_server_process_ip_rule(request, addr, 4, DNS_T_A, result_flag, &alias);
+	ip_check_result = _dns_server_process_ip_rule(request, addr, 4, DNS_T_A, result_flag, &alias, &cname_rule);
+	if (cname_rule != NULL) {
+		_dns_server_clear_ip_result(request);
+		request->ip_rule_cname_matched = 1;
+		request->has_cname = 1;
+		safe_strncpy(request->cname, cname_rule->cname, sizeof(request->cname));
+		request->ttl_cname = _dns_server_get_conf_ttl(request, ttl);
+		tlog(TLOG_INFO, "ip rule matched, reply cname %s", request->cname);
+		return -1;
+	}
 	if (ip_check_result == 0) {
 		/* match */
 		return -1;
@@ -105,12 +142,26 @@ static int _dns_server_process_answer_AAAA_IP(struct dns_request *request, char 
 	int ip_check_result = 0;
 	unsigned char *paddrs[MAX_IP_NUM];
 	struct dns_iplist_ip_addresses *alias = NULL;
+	struct ip_rule_cname *cname_rule = NULL;
 	int paddr_num = 0;
+
+	if (request->ip_rule_cname_matched) {
+		return -1;
+	}
 
 	paddrs[paddr_num] = addr;
 	paddr_num = 1;
 
-	ip_check_result = _dns_server_process_ip_rule(request, addr, 16, DNS_T_AAAA, result_flag, &alias);
+	ip_check_result = _dns_server_process_ip_rule(request, addr, 16, DNS_T_AAAA, result_flag, &alias, &cname_rule);
+	if (cname_rule != NULL) {
+		_dns_server_clear_ip_result(request);
+		request->ip_rule_cname_matched = 1;
+		request->has_cname = 1;
+		safe_strncpy(request->cname, cname_rule->cname, sizeof(request->cname));
+		request->ttl_cname = _dns_server_get_conf_ttl(request, ttl);
+		tlog(TLOG_INFO, "ip rule matched, reply cname %s", request->cname);
+		return -1;
+	}
 	if (ip_check_result == 0) {
 		/* match */
 		return -1;
@@ -422,6 +473,10 @@ int _dns_server_process_answer(struct dns_request *request, const char *domain, 
 			case DNS_T_CNAME: {
 				char domain_name[DNS_MAX_CNAME_LEN] = {0};
 				char domain_cname[DNS_MAX_CNAME_LEN] = {0};
+				if (request->ip_rule_cname_matched) {
+					/* keep the CNAME set by the ip-rule */
+					continue;
+				}
 				dns_get_CNAME(rrs, domain_name, DNS_MAX_CNAME_LEN, &ttl, domain_cname, DNS_MAX_CNAME_LEN);
 				if (strncasecmp(domain_name, request->domain, DNS_MAX_CNAME_LEN - 1) != 0 &&
 					strncasecmp(domain_name, cname, DNS_MAX_CNAME_LEN - 1) != 0) {

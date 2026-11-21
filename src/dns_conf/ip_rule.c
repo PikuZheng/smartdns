@@ -87,6 +87,7 @@ int _config_ip_rules(void *data, int argc, char *argv[])
 		{"bogus-nxdomain", no_argument, NULL, 'n'},
 		{"ignore-ip", no_argument, NULL, 'i'},
 		{"ip-alias", required_argument, NULL, 'a'},
+		{"cname", required_argument, NULL, 'c'},
 		{NULL, no_argument, NULL, 0}
 	};
 	/* clang-format on */
@@ -132,6 +133,12 @@ int _config_ip_rules(void *data, int argc, char *argv[])
 		}
 		case 'a': {
 			if (_conf_ip_alias(ip_cidr, optarg) != 0) {
+				goto errout;
+			}
+			break;
+		}
+		case 'c': {
+			if (_conf_ip_cname(ip_cidr, optarg) != 0) {
 				goto errout;
 			}
 			break;
@@ -342,6 +349,9 @@ static void *_new_dns_ip_rule_ext(enum ip_rule ip_rule, int ext_size)
 		break;
 	case IP_RULE_ALIAS:
 		size = sizeof(struct ip_rule_alias);
+		break;
+	case IP_RULE_CNAME:
+		size = sizeof(struct ip_rule_cname);
 		break;
 	default:
 		return NULL;

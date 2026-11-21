@@ -334,6 +334,8 @@ struct dns_request {
 	int has_cname;
 	char cname[DNS_MAX_CNAME_LEN];
 	int ttl_cname;
+	/* ip-rules -cname matched: drop all IPs and reply CNAME only */
+	int ip_rule_cname_matched;
 
 	int has_ip;
 	int ping_time;

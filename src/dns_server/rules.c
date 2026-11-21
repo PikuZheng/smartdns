@@ -296,7 +296,7 @@ int _dns_server_passthrough_rule_check(struct dns_request *request, const char *
 					 addr[3]);
 
 				/* ip rule check */
-				ip_check_result = _dns_server_process_ip_rule(request, addr, 4, DNS_T_A, result_flag, NULL);
+				ip_check_result = _dns_server_process_ip_rule(request, addr, 4, DNS_T_A, result_flag, NULL, NULL);
 				if (ip_check_result == 0 || ip_check_result == -2 || ip_check_result == -3) {
 					/* match, skip, nxdomain */
 					_dns_server_request_release(request);
@@ -338,7 +338,7 @@ int _dns_server_passthrough_rule_check(struct dns_request *request, const char *
 					 name, ttl_tmp, addr[0], addr[1], addr[2], addr[3], addr[4], addr[5], addr[6], addr[7], addr[8],
 					 addr[9], addr[10], addr[11], addr[12], addr[13], addr[14], addr[15]);
 
-				ip_check_result = _dns_server_process_ip_rule(request, addr, 16, DNS_T_AAAA, result_flag, NULL);
+				ip_check_result = _dns_server_process_ip_rule(request, addr, 16, DNS_T_AAAA, result_flag, NULL, NULL);
 				if (ip_check_result == 0 || ip_check_result == -2 || ip_check_result == -3) {
 					/* match, skip, nxdomain */
 					_dns_server_request_release(request);

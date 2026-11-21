@@ -18,6 +18,7 @@
 
 #include "ip_alias.h"
 #include "ip_rule.h"
+#include "smartdns/util.h"
 
 static int _config_ip_alias_add_ip_callback(const char *ip_cidr, void *priv)
 {
@@ -75,6 +76,35 @@ errout:
 
 	if (target_ips) {
 		free(target_ips);
+	}
+
+	return -1;
+}
+
+int _conf_ip_cname(const char *ip_cidr, const char *cname)
+{
+	struct ip_rule_cname *ip_cname = NULL;
+
+	if (ip_cidr == NULL || cname == NULL || cname[0] == '\0') {
+		goto errout;
+	}
+
+	ip_cname = _new_dns_ip_rule(IP_RULE_CNAME);
+	if (ip_cname == NULL) {
+		goto errout;
+	}
+
+	safe_strncpy(ip_cname->cname, cname, sizeof(ip_cname->cname));
+
+	if (_config_ip_rule_add(ip_cidr, IP_RULE_CNAME, ip_cname) != 0) {
+		goto errout;
+	}
+
+	_dns_ip_rule_put(&ip_cname->head);
+	return 0;
+errout:
+	if (ip_cname) {
+		_dns_ip_rule_put(&ip_cname->head);
 	}
 
 	return -1;

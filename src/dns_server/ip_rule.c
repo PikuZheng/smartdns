@@ -130,7 +130,7 @@ static int _dns_server_ip_rule_check(struct dns_request *request, struct dns_ip_
 		}
 	}
 
-	if (ip_rules->rules[IP_RULE_ALIAS] != NULL) {
+	if (ip_rules->rules[IP_RULE_ALIAS] != NULL || ip_rules->rules[IP_RULE_CNAME] != NULL) {
 		goto match;
 	}
 
@@ -186,7 +186,8 @@ int _dns_server_process_ip_alias(struct dns_request *request, struct dns_iplist_
 }
 
 int _dns_server_process_ip_rule(struct dns_request *request, unsigned char *addr, int addr_len, dns_type_t addr_type,
-								int result_flag, struct dns_iplist_ip_addresses **alias)
+								int result_flag, struct dns_iplist_ip_addresses **alias,
+								struct ip_rule_cname **cname_rule)
 {
 	struct dns_ip_rules *ip_rules = NULL;
 	int ret = 0;
@@ -197,13 +198,19 @@ int _dns_server_process_ip_rule(struct dns_request *request, unsigned char *addr
 		return ret;
 	}
 
+	if (ip_rules->rules[IP_RULE_CNAME] && cname_rule != NULL) {
+		if (request->no_ipalias == 0) {
+			*cname_rule = container_of(ip_rules->rules[IP_RULE_CNAME], struct ip_rule_cname, head);
+		}
+
+		/* need process ip rule cname */
+		return -1;
+	}
+
 	if (ip_rules->rules[IP_RULE_ALIAS] && alias != NULL) {
 		if (request->no_ipalias == 0) {
 			struct ip_rule_alias *rule = container_of(ip_rules->rules[IP_RULE_ALIAS], struct ip_rule_alias, head);
 			*alias = &rule->ip_alias;
-			if (alias == NULL) {
-				return 0;
-			}
 		}
 
 		/* need process ip alias */
