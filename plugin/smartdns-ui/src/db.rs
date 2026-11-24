@@ -1048,7 +1048,7 @@ impl DB {
                  ?1,
                  ?2
              FROM domain
-             WHERE timestamp >= ?1
+             WHERE timestamp >= ?1 AND timestamp <= ?2
              GROUP BY client
              ORDER BY COUNT(*) DESC
              LIMIT 20",
@@ -1134,6 +1134,7 @@ impl DB {
                     domain_daily_count \
                  WHERE \
                     timestamp >= strftime('%s', 'now') * 1000 - ? * 1000 \
+                    AND timestamp <= strftime('%s', 'now') * 1000
                  ORDER BY \
                     timestamp DESC;\
                  ",
@@ -1203,6 +1204,7 @@ impl DB {
                     domain_hourly_count \
                  WHERE \
                     timestamp >= strftime('%s', 'now') * 1000 - ? * 1000 \
+                    AND timestamp <= strftime('%s', 'now') * 1000
                  ORDER BY \
                     timestamp DESC;\
                  ";
@@ -1266,7 +1268,7 @@ impl DB {
                ?1,
                ?2
              FROM domain
-             WHERE timestamp >= ?1
+             WHERE timestamp >= ?1 AND timestamp <= ?2
              GROUP BY domain
              ORDER BY COUNT(*) DESC
              LIMIT 20",
