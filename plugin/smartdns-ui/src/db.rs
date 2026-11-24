@@ -1103,9 +1103,6 @@ impl DB {
             }
         }
 
-        //let sql = "SELECT client, count FROM top_client_list ORDER BY count DESC";
-        //self.debug_query_plan(&conn, sql.to_string(), &vec![]);
-
         let tx = conn.transaction()?;
         tx.execute("DELETE FROM top_client_list", [])?;
         tx.execute(
@@ -1122,26 +1119,6 @@ impl DB {
              LIMIT 20",
             rusqlite::params![timestamp, timestamp_now],
         )?;
-
-        // The SELECT below only filled client_count_list, which was never
-        // used or returned. Keep INSERT ... SELECT as the sole write.
-        // let mut client_count_list = Vec::new();
-        //
-        // let mut stmt = tx.prepare(sql)?;
-        // let rows = stmt.query_map([], |row| {
-        //     Ok(ClientQueryCount {
-        //         client_ip: row.get(0)?,
-        //         count: row.get(1)?,
-        //         timestamp_start: timestamp,
-        //         timestamp_end: timestamp_now,
-        //     })
-        // })?;
-        //
-        // for row in rows {
-        //     client_count_list.push(row?);
-        // }
-        //
-        // stmt.finalize()?;
         tx.commit()?;
 
         Ok(())
@@ -1346,9 +1323,6 @@ impl DB {
             }
         }
 
-        //let sql = "SELECT domain, count FROM top_domain_list ORDER BY count DESC";
-        //self.debug_query_plan(&conn, sql.to_string(), &vec![]);
-
         let tx = conn.transaction()?;
         tx.execute("DELETE FROM top_domain_list", [])?;
         tx.execute(
@@ -1365,25 +1339,6 @@ impl DB {
              LIMIT 20",
             rusqlite::params![timestamp, timestamp_now],
         )?;
-
-        // The SELECT below only filled domain_count_list, which was never
-        // used or returned. Keep INSERT ... SELECT as the sole write.
-        // let mut domain_count_list = Vec::new();
-        //
-        // let mut stmt = tx.prepare(sql)?;
-        // let rows = stmt.query_map([], |row| {
-        //     Ok(DomainQueryCount {
-        //         domain: row.get(0)?,
-        //         count: row.get(1)?,
-        //         timestamp_start: timestamp,
-        //         timestamp_end: timestamp_now,
-        //     })
-        // })?;
-        //
-        // for row in rows {
-        //     domain_count_list.push(row?);
-        // }
-        // stmt.finalize()?;
         tx.commit()?;
 
         Ok(())
