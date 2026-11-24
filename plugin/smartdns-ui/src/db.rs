@@ -1103,8 +1103,8 @@ impl DB {
             }
         }
 
-        let sql = "SELECT client, count FROM top_client_list ORDER BY count DESC";
-        self.debug_query_plan(&conn, sql.to_string(), &vec![]);
+        //let sql = "SELECT client, count FROM top_client_list ORDER BY count DESC";
+        //self.debug_query_plan(&conn, sql.to_string(), &vec![]);
 
         let tx = conn.transaction()?;
         tx.execute("DELETE FROM top_client_list", [])?;
@@ -1346,8 +1346,8 @@ impl DB {
             }
         }
 
-        let sql = "SELECT domain, count FROM top_domain_list ORDER BY count DESC";
-        self.debug_query_plan(&conn, sql.to_string(), &vec![]);
+        //let sql = "SELECT domain, count FROM top_domain_list ORDER BY count DESC";
+        //self.debug_query_plan(&conn, sql.to_string(), &vec![]);
 
         let tx = conn.transaction()?;
         tx.execute("DELETE FROM top_domain_list", [])?;
