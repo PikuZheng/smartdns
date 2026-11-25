@@ -121,7 +121,7 @@ jobs:
           echo ${{ github.sha }} >> Release.txt
           echo "status=success" >> $GITHUB_OUTPUT
       - name: Upload firmware to release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v3
         if: steps.tag.outputs.status == 'success'
         env:
           GITHUB_TOKEN: ${{ secrets.TOKEN }}
@@ -167,7 +167,7 @@ jobs:
           echo ${{ github.sha }} >> Release.txt
           echo "status=success" >> $GITHUB_OUTPUT
       - name: Upload firmware to release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v3
         if: steps.tag.outputs.status == 'success'
         env:
           GITHUB_TOKEN: ${{ secrets.TOKEN }}
