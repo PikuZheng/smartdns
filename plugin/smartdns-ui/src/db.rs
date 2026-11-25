@@ -776,9 +776,8 @@ impl DB {
         }
 
         let read_conn = read_conn.unwrap();
-        if read_conn.execute("PRAGMA cache_size = -2048", []).is_err() {
-            return None;
-        }
+        read_conn.execute("PRAGMA cache_size = -2048", []).ok()?;
+        read_conn.execute("PRAGMA temp_store = MEMORY", []).ok()?;
 
         Some(read_conn)
     }
@@ -1397,6 +1396,20 @@ impl DB {
             step_by_cursor: false,
         };
 
+        // Retrieve data earlier, and avoid initiating a new query before the previous one has been closed.
+        if let Some(p) = param {
+            if let Some(v) = &p.cursor {
+                ret.total_count = v.total_count;
+                ret.step_by_cursor = true;
+            } else {
+                ret.total_count = self.get_domain_list_count(param);
+            }
+            // Return immediately if no matching data.
+            if ret.total_count == 0 {
+                return Ok(ret);
+            }
+        }
+
         let conn = self.get_readonly_conn();
         if conn.as_ref().is_none() {
             return Err("db is not open".into());
@@ -1473,16 +1486,6 @@ impl DB {
 
         if cursor_reverse {
             ret.domain_list.reverse();
-        }
-
-        if let Some(p) = param {
-            if let Some(v) = &p.cursor {
-                ret.total_count = v.total_count;
-                ret.step_by_cursor = true;
-            } else {
-                let total_count = self.get_domain_list_count(param);
-                ret.total_count = total_count;
-            }
         }
 
         dns_log!(
@@ -1648,6 +1651,15 @@ impl DB {
             step_by_cursor: false,
         };
 
+        // Retrieve data earlier, and avoid initiating a new query before the previous one has been closed.
+        if let Some(_p) = param {
+            ret.total_count = self.get_client_list_count(param);
+            // Return immediately if no matching data.
+            if ret.total_count == 0 {
+                return Ok(ret);
+            }
+        }
+
         let conn = self.get_readonly_conn();
         if conn.as_ref().is_none() {
             return Err("db is not open".into());
@@ -1744,10 +1756,6 @@ impl DB {
                     ret.client_list.push(row);
                 }
             }
-        }
-
-        if let Some(_p) = param {
-            ret.total_count = self.get_client_list_count(param);
         }
 
         dns_log!(
